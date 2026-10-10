@@ -1,0 +1,5 @@
+[Action x]
+Name=X
+Types=image/*;*;
+Directories=true
+Command=a %F

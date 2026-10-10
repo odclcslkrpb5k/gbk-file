@@ -135,24 +135,59 @@ Protect (deliberate, flagged):
 - Unavoidable exits: OOM (g_malloc aborts), X server connection loss. Not our code.
 
 ## Current state of the code (update as it changes)
-Skeleton committed 2026-10-10. `./build {debug|analyze|release|shell|image}`.
+`./build {debug|analyze|fuzz [s]|release|shell|image}`. Release = debug tests + analyzer +
+20s fuzz per target + hardened build + tests. Tree must be clean for release.
 - out/ is build output (NOT build/: the ./build script occupies that name).
 - Docker here is NOT rootless: container runs with --user $(id -u):$(id -g), HOME=/tmp.
   If out/ ever ends up root-owned, delete it via the container (rm as root inside).
 - meson: get_option() can't be used inside project(); option named 'version' is rejected
-  -> ours is 'build_id'. Toolchain-pinned flags are required, not probed.
+  -> ours is 'build_id'. Toolchain-pinned flags are required, not probed. GCC-only warnings
+  are gated on cc.get_id() (clang is used only for libFuzzer builds).
 - src/prelude.h is force-included (-include) in every TU: all system headers, then
   #pragma GCC poison bans. New system header? add it to prelude ABOVE the poison block.
-  Macros must be #undef'd before poisoning (GCC ignores poisoned names inside macros
-  defined earlier). meson.build has configure-time probes: each ban must fail to compile
-  (and a baseline must compile). Add a probe whenever adding a ban.
+  Macros must be #undef'd before poisoning. meson.build has configure-time probes: each
+  ban must fail to compile (and a baseline must compile). Add a probe with every new ban.
 - g_error is banned (its for(;;) trips -fanalyzer). Use gbk_fatal() (src/fatal.h).
-- src/lifetime.{h,c}: gbk_connect / gbk_connect_after / gbk_idle_add / gbk_timeout_add /
-  gbk_source_cancel / gbk_lifetime_live. Only lifetime.c (built with -DGBK_LIFETIME_IMPL)
-  may use raw g_signal_connect*/g_idle_add*/g_timeout_add*/g_source_attach.
-  main() calls gbk_fatal if gbk_lifetime_live() != 0 after the app is freed.
-- Tests: tests/test-<name>.c, add name to the foreach in tests/meson.build. Run with
-  G_DEBUG=fatal-warnings,fatal-criticals and strict ASan/UBSan options.
-- Release = debug tests + analyzer + hardened (-O2 -g, asserts ON via b_ndebug=false) + tests.
-- Image currently has gcc/meson/gtk-dev/xvfb only. clang/clang-tidy/valgrind/fuzzer to be
-  added when we have parsers to fuzz (type table, config).
+- Never write "type/*" (slash-star) in comments: -Wcomment error.
+- g_assert_* in tests can return (non-fatal mode): don't deref after g_assert_nonnull;
+  use if (!x) gbk_fatal(...). The analyzer catches this.
+- memcmp/memcpy with an empty GArray: data may be nullptr -> UB even with len 0. Guard.
+
+Modules (src/, all in libgbk-core except lifetime):
+- lifetime: gbk_connect[_after], gbk_idle_add, gbk_timeout_add, gbk_fd_watch,
+  gbk_source_cancel, gbk_lifetime_live. Only lifetime.c may use raw signal/source APIs.
+  fd watches abort on G_IO_NVAL. GLib notifies weak refs in GObject's own dispose, so a
+  subclass dispose that closes a watched fd must gbk_source_cancel the watch first.
+- filetype: immutable atomically-refcounted ext->MIME table (GbkTypeId uint16, builtins
+  0..7). gbk_type_table_new_system() reads XDG globs2 + generic-icons.
+- natsort: sort keys (NFD + casefold; ASCII fast path) + natural compare (total preorder,
+  fuzz-checked). Final tiebreak on raw name lives in dirmodel.
+- entry: GbkEntry = one malloc (struct + name\0[display\0]key\0). statx flags
+  AT_NO_AUTOMOUNT|AT_STATX_DONT_SYNC. Hidden = leading '.' or trailing '~'.
+- inotify-parse: pure parser (fuzzed).
+- scanner: detached worker thread per dir; owns ALL fs syscalls. Messages via GAsyncQueue +
+  eventfd. CHUNK(first..last)=snapshot, DELTA, ERROR, GONE. Coalesce 10ms quiet/50ms max.
+  >PENDING_MAX names or IN_Q_OVERFLOW -> rescan. Rescans must openat(dirfd,".") — NOT
+  dup() (shares dir offset -> empty rescan; real bug, caught by storm test).
+  Deleted dir: we hold its fd so IN_DELETE_SELF never fires; detect self IN_ATTRIB +
+  fstat nlink==0. Test hooks: set_pending_max_for_test, rescans, live_workers.
+- dirmodel: GObject, signals changed/state-changed. Generational slot handles (GbkHandle:
+  gen<<32|slot). Rescan = mark (epoch) and sweep at last chunk. Incremental re-sort for
+  small batches, full sort otherwise; gbk_dir_model_check_order() is the oracle.
+  Drains <=16 messages per wakeup then re-arms.
+- command: argv templates via g_shell_parse_argv; %d %f %F %c %%; %F/%c whole-arg only;
+  program literal; files always absolute (no "-rf" option injection). No shell, ever.
+- config: GKeyFile at $XDG_CONFIG_HOME/gbk-file/gbk-file.conf. Strict all-or-nothing:
+  any error -> defaults + all errors reported. Sections: General(Terminal, TerminalRun,
+  ShowHidden, SortBy), Interpreters (ext=argv; replaces defaults; marks scripts),
+  Types (ext=mime overrides, weight 1000), Action <id> (Name, Types, Directories, Command).
+  docs/example.conf is loaded by a test (can't rot).
+
+Tests: tests/test-<name>.c listed in tests/meson.build unit_tests. Fuzz targets
+tests/fuzz/fuzz-<name>.c + seeds in tests/fuzz/seeds/<name>/ (replayed as tests in normal
+builds; fuzz_targets list). A fuzz crash -> minimise into seeds as a regression test.
+Tests run hermetic (XDG dirs point nowhere) with fatal warnings/criticals, ASan/UBSan.
+
+Not built yet: GUI (compact view widget, path bar, tabs, status bar, menus), launching
+(spawn, default handler via GAppInfo, script/terminal logic), clipboard, file operations
+(copy/move/trash/delete/rename with conflict dialog), type-ahead, keybindings.

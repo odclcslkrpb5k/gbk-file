@@ -7,12 +7,13 @@ test_env.set('UBSAN_OPTIONS', 'halt_on_error=1:print_stacktrace=1')
 # Hermetic: never read the invoking user's real config/data.
 test_env.set('XDG_CONFIG_HOME', '/nonexistent/config')
 test_env.set('XDG_DATA_HOME', '/nonexistent/data')
+test_env.set('GBK_SOURCE_ROOT', meson.project_source_root())
 
 test_libs = [core_lib, lifetime_lib]
 test_inc = [config_inc, core_inc]
 
-unit_tests = ['lifetime', 'filetype', 'natsort', 'dirmodel', 'scanner']
-fuzz_targets = ['filetype', 'natsort', 'inotify', 'entry']
+unit_tests = ['lifetime', 'filetype', 'natsort', 'dirmodel', 'scanner', 'command', 'config']
+fuzz_targets = ['filetype', 'natsort', 'inotify', 'entry', 'command', 'config']
 
 if not get_option('fuzzing')
   foreach name : unit_tests
