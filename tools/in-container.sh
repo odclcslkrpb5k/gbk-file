@@ -67,11 +67,19 @@ release() {
   echo "built: out/release/src/gbk-file ($(out/release/src/gbk-file --version))"
 }
 
+bench() {
+  echo "== bench (release build, data in out/bench) =="
+  setup out/release -Dbuildtype=debugoptimized -Db_ndebug=false -Dhardening=true
+  meson compile -C out/release
+  meson test -C out/release --benchmark --verbose 2>&1 | grep -E "^ *(entries|first|full|per|model|toggle|live|readdir|statx|build)|scan-[0-9]+ " | sed 's/^ *[0-9]*\/[0-9]* //'
+}
+
 case "${1:-}" in
   debug) debug ;;
   analyze) analyze ;;
   release) release ;;
   fuzz) fuzz "${2:-60}" ;;
+  bench) bench ;;
   shell) exec bash ;;
   *) echo "unknown command: ${1:-}" >&2; exit 2 ;;
 esac

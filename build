@@ -4,6 +4,7 @@
 #   ./build debug     sanitizer (ASan+UBSan) build + tests
 #   ./build analyze   GCC -fanalyzer build (any finding fails)
 #   ./build fuzz [s]  libFuzzer every target for s seconds each (default 60)
+#   ./build bench     scan/sort/memory benchmark (release build, real filesystem)
 #   ./build release   debug + analyze + 20s fuzz must pass, then hardened build + tests.
 #                     Refuses a dirty tree so the embedded git hash identifies the source.
 #   ./build shell     interactive shell in the build image
@@ -22,9 +23,9 @@ build_image() {
 }
 
 case "$cmd" in
-  debug|analyze|release|shell|fuzz) ;;
+  debug|analyze|release|shell|fuzz|bench) ;;
   image) build_image; exit 0 ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 
 docker image inspect "$tag" >/dev/null 2>&1 || build_image

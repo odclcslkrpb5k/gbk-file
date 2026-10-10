@@ -188,6 +188,13 @@ tests/fuzz/fuzz-<name>.c + seeds in tests/fuzz/seeds/<name>/ (replayed as tests 
 builds; fuzz_targets list). A fuzz crash -> minimise into seeds as a regression test.
 Tests run hermetic (XDG dirs point nowhere) with fatal warnings/criticals, ASan/UBSan.
 
+Benchmarks (./build bench, release, warm cache, host fs, 2026-10-10):
+  100k entries: first paint data 5.7ms, full listing 390ms, ~153 B/entry heap,
+  full re-sort 66ms, live create latency ~11ms (10ms coalescing quiet period).
+  Per entry: readdir 0.4us, statx 2.4us (kernel, dominant), build 0.35us, model 0.9us.
+  Optimization candidate: parallel statx across a small thread pool (helps cold cache /
+  network fs most). Loading re-sorts are throttled to every 100ms (order_stale).
+
 Not built yet: GUI (compact view widget, path bar, tabs, status bar, menus), launching
 (spawn, default handler via GAppInfo, script/terminal logic), clipboard, file operations
 (copy/move/trash/delete/rename with conflict dialog), type-ahead, keybindings.

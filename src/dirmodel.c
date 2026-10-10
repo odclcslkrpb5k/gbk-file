@@ -2,6 +2,10 @@
 #include "lifetime.h"
 #include "natsort.h"
 
+/* While a directory is still loading, re-sort for display at most this often (the first
+ * chunk is always shown at once). Each re-sort is O(n log n) over everything so far. */
+#define LOADING_REFRESH_US (100 * 1000)
+
 /* Messages handled per main-loop wakeup before yielding (keeps the UI responsive while a
  * huge directory streams in). */
 #define DRAIN_BUDGET 16
@@ -43,6 +47,9 @@ struct _GbkDirModel
   uint32_t epoch;        /* current snapshot */
   uint32_t batch;        /* current change batch stamp */
   GArray *touched;       /* uint32_t slot ids changed in this batch */
+  bool order_stale;      /* re-sort deferred while loading: `order` lacks recent entries */
+  bool painted;          /* "changed" has been emitted at least once */
+  int64_t last_order_us; /* when `order` was last brought up to date */
 };
 
 G_DEFINE_FINAL_TYPE (GbkDirModel, gbk_dir_model, G_TYPE_OBJECT)
@@ -121,14 +128,37 @@ update_positions (GbkDirModel *m, size_t from)
     slot_at (m, g_array_index (m->order, uint32_t, i))->pos = (uint32_t) i;
 }
 
+typedef struct
+{
+  const GbkEntry *e;
+  uint32_t id;
+} SortItem;
+
+static int
+compare_items (const void *pa, const void *pb, void *data)
+{
+  const SortItem *a = pa, *b = pb;
+  return compare_entries (a->e, b->e, *(const GbkSortMode *) data);
+}
+
 static void
 build_full_order (GbkDirModel *m, GArray *out)
 {
-  g_array_set_size (out, 0);
+  /* Sort (entry, id) pairs so the comparator touches entries directly, not via slots. */
+  g_autoptr (GArray) items = g_array_sized_new (false, false, sizeof (SortItem), m->slots->len);
   for (uint32_t i = 0; i < m->slots->len; i++)
-    if (is_visible (m, slot_at (m, i)->e))
-      g_array_append_val (out, i);
-  g_sort_array (out->data, out->len, sizeof (uint32_t), compare_slots, m);
+    {
+      const GbkEntry *e = slot_at (m, i)->e;
+      if (is_visible (m, e))
+        {
+          SortItem it = { e, i };
+          g_array_append_val (items, it);
+        }
+    }
+  g_sort_array (items->data, items->len, sizeof (SortItem), compare_items, &m->sort);
+  g_array_set_size (out, items->len);
+  for (guint i = 0; i < items->len; i++)
+    g_array_index (out, uint32_t, i) = g_array_index (items, SortItem, i).id;
 }
 
 static void
@@ -360,12 +390,25 @@ end_batch (GbkDirModel *m, bool changed)
 {
   if (!changed)
     return;
+  int64_t now = g_get_monotonic_time ();
+  /* Big directory still streaming in: show the first chunk at once, then refresh at a
+   * bounded rate. Deferring is safe only while loading: chunks only add or replace entries,
+   * so the stale order still references live slots. The last chunk ends LOADING, so the
+   * final order is always computed. */
+  if (m->state == GBK_DIR_LOADING && m->painted && now - m->last_order_us < LOADING_REFRESH_US)
+    {
+      m->order_stale = true;
+      return;
+    }
   /* Incremental costs O(n) plus a memmove per touched entry; a full sort is O(n log n).
    * Past a few percent of the directory, sorting from scratch is cheaper. */
-  if (m->touched->len > 64 + m->order->len / 16)
+  if (m->order_stale || m->touched->len > 64 + m->order->len / 16)
     rebuild_order (m);
   else
     incremental_order (m);
+  m->order_stale = false;
+  m->painted = true;
+  m->last_order_us = now;
   g_signal_emit (m, signals[SIGNAL_CHANGED], 0);
 }
 
@@ -489,6 +532,8 @@ gbk_dir_model_apply_for_test (GbkDirModel *m, GbkScanMsg *msg)
 void
 gbk_dir_model_check_order (GbkDirModel *m)
 {
+  if (m->order_stale)
+    return;               /* deliberately behind while loading; see end_batch */
   g_autoptr (GArray) expected = g_array_new (false, false, sizeof (uint32_t));
   build_full_order (m, expected);
   /* An empty GArray's data may be nullptr, and memcmp(nullptr, ..., 0) is UB. */

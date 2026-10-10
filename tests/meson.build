@@ -46,3 +46,14 @@ foreach name : fuzz_targets
     test('fuzz-seeds-' + name, exe, env : test_env, args : [seeds], timeout : 300)
   endif
 endforeach
+
+# ./build bench: release build, data on the real host filesystem under out/bench.
+bench_dir = meson.project_source_root() / 'out' / 'bench'
+bench_exe = executable('bench-scan', 'bench-scan.c',
+  include_directories : test_inc,
+  link_with : test_libs,
+  dependencies : deps,
+)
+foreach n : ['1000', '10000', '100000']
+  benchmark('scan-' + n, bench_exe, args : [bench_dir, n], timeout : 600)
+endforeach
