@@ -10,6 +10,7 @@ lifetime_lib = static_library('gbk-lifetime', 'lifetime.c',
 # Non-GUI core: everything testable without a display.
 core_lib = static_library('gbk-core',
   'filetype.c',
+  'natsort.c',
   include_directories : config_inc,
   link_with : lifetime_lib,
   dependencies : deps,
