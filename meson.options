@@ -1,0 +1,6 @@
+option('build_id', type : 'string', value : 'unversioned',
+  description : 'Build identifier (git hash); set by tools/build')
+option('hardening', type : 'boolean', value : false,
+  description : 'Production hardening flags (incompatible with sanitizers)')
+option('analyzer', type : 'boolean', value : false,
+  description : 'Compile with GCC -fanalyzer')

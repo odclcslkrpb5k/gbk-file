@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Host entry point. Everything real happens inside the Docker build image.
+#
+#   ./build debug     sanitizer (ASan+UBSan) build + tests
+#   ./build analyze   GCC -fanalyzer build (any finding fails)
+#   ./build release   debug + analyze must pass, then hardened build + tests.
+#                     Refuses a dirty tree so the embedded git hash identifies the source.
+#   ./build shell     interactive shell in the build image
+#   ./build image     (re)build the build image
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cmd=${1:-}
+
+# Image tag follows the Dockerfile content, so editing it forces a rebuild.
+tag=gbk-file-build:$(sha256sum "$root/Dockerfile" | cut -c1-12)
+
+build_image() {
+  # No build context: the image needs nothing from the repo (it is mounted at run time).
+  docker build -t "$tag" - < "$root/Dockerfile"
+}
+
+case "$cmd" in
+  debug|analyze|release|shell) ;;
+  image) build_image; exit 0 ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
+
+docker image inspect "$tag" >/dev/null 2>&1 || build_image
+
+version=$(git -C "$root" rev-parse --short=12 HEAD)
+if [[ -n $(git -C "$root" status --porcelain) ]]; then
+  if [[ $cmd == release ]]; then
+    echo "release: working tree is dirty; commit first so the build hash means something." >&2
+    git -C "$root" status --short >&2
+    exit 1
+  fi
+  version+="-dirty"
+fi
+
+tty=()
+[[ -t 0 && -t 1 ]] && tty=(-it)
+
+# --network=none: builds are hermetic; nothing can be fetched at build time.
+# --user: run as the invoking user so build output in the repo is owned by them, not root.
+exec docker run --rm "${tty[@]}" --network=none --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp -v "$root:/src" -e GBK_VERSION="$version" "$tag" "$cmd"

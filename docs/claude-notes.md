@@ -31,6 +31,15 @@ Primary goal: maximum performance in every scenario + minimal memory footprint.
 - Double-click executable: runs it. Script (by extension) -> runs in configured terminal so
   stdout/stderr visible. Extensionless executables / AppImage -> run directly, no terminal.
   Right-click menu: "Execute" and "Execute in Terminal" to override per-invocation.
+- Non-executable script: double-click -> default app. Right-click still offers "Execute" and
+  "Execute in Terminal" (run via per-extension interpreter map in config, e.g. sh->sh,
+  py->python3; never chmod the file).
+- Config: two terminal entries. Terminal= (F4, open in dir) and TerminalRun= (run a script,
+  e.g. xfce4-terminal --hold --working-directory=%d -x %f).
+- Sort by modified: newest first, folders still first.
+- Delete/trash/paste-conflict behavior: follow Thunar (Shift+Del confirms; untrashable ->
+  offer permanent delete; paste conflicts -> replace/skip/rename/apply-to-all dialog).
+- Config format: GLib GKeyFile (.desktop-style). Decided 2026-10-10.
 - Clipboard/edit keys: Ctrl+C/X/V, Delete -> trash (freedesktop spec), Shift+Delete -> permanent. F2 rename.
 - VIEW: Thunar "Compact view" at lowest zoom ONLY. No other view modes, ever.
   (names flow top->bottom in columns, columns left->right, horizontal scroll)
@@ -41,7 +50,6 @@ Primary goal: maximum performance in every scenario + minimal memory footprint.
 - Type-ahead: typing jumps to first match. Used frequently.
 
 ## Open questions
-- Config format: user partial to YAML; I recommended GKeyFile (.desktop-style) — awaiting answer.
 
 ## Feature inventory (user, 2026-10-10; "not exhaustive, muscle memory")
 - F4: open terminal in cwd. Terminal command configurable (user uses xfce4-terminal).
@@ -91,7 +99,8 @@ Stable target, no new features coming. Fine for us.
 
 ## Safety plan (proposed 2026-10-10, awaiting user OK)
 Eliminate:
-- No thumbnails/sniffing -> no decoder code in process. No plugins, no dlopen (-z nodlopen).
+- No thumbnails/sniffing -> no decoder code of ours. No plugins of our own. (GTK itself still
+  dlopens theme engines/IM modules; -z nodlopen only marks OUR binary non-dlopenable.)
 - File entries live in per-directory-load storage, referenced by (generation,index) handles,
   never raw pointers held across main-loop iterations -> stale-entry UAF can't exist.
 - GTK touched only from main thread; workers send self-contained messages (owned copies).

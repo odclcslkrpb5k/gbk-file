@@ -1,0 +1,18 @@
+# Build environment for gbk-file. Everything (build, tests, analyzers) runs in here;
+# nothing on the workstation matters beyond Docker itself.
+#
+# The base must match the host distro release: the binary links against the system
+# glibc and GTK at runtime, so we build against the same versions the host runs.
+# When the host upgrades, bump this digest (docker pull ubuntu:<ver>; docker image inspect).
+FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      gcc libc6-dev meson ninja-build pkgconf \
+      libgtk-3-dev \
+      xvfb xauth \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+ENTRYPOINT ["/src/tools/in-container.sh"]
