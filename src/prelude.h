@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdckdint.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -26,6 +27,7 @@
 #include <gtk/gtk.h>
 
 #include "gbk-config.h"
+#include "fatal.h"
 
 /* --- Unbounded or error-swallowing libc string/number functions. ---
  * Use g_strdup_printf / GString / g_strlcpy / g_ascii_strtoll with error checks. */
@@ -36,6 +38,10 @@
  * Commands are always parsed to argv and spawned directly (no injection via filenames). */
 #pragma GCC poison system popen
 #pragma GCC poison g_spawn_command_line_async g_spawn_command_line_sync
+
+/* --- g_error: use gbk_fatal (fatal.h). --- */
+#undef g_error
+#pragma GCC poison g_error
 
 /* --- Stack allocation of runtime size. --- */
 #undef alloca

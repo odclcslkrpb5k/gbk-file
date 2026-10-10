@@ -37,7 +37,7 @@ connect_impl (GObject *owner, gpointer instance, const char *signal,
 
   gulong id = g_signal_connect_closure (instance, signal, closure, after);
   if (id == 0)
-    g_error ("gbk_connect: no signal \"%s\" on %s", signal, G_OBJECT_TYPE_NAME (instance));
+    gbk_fatal ("gbk_connect: no signal \"%s\" on %s", signal, G_OBJECT_TYPE_NAME (instance));
   return id;
 }
 

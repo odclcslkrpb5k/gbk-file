@@ -25,6 +25,6 @@ main (int argc, char **argv)
 
   /* Everything has been torn down; any registration still alive is a lifetime bug. */
   if (gbk_lifetime_live () != 0)
-    g_error ("%d signal connection(s)/source(s) outlived their owners", gbk_lifetime_live ());
+    gbk_fatal ("%d signal connection(s)/source(s) outlived their owners", gbk_lifetime_live ());
   return status;
 }

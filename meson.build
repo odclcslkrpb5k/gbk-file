@@ -100,6 +100,7 @@ banned = {
   'strncpy'          : 'char b[4]; strncpy(b, "x", 4);',
   'atoi'             : '(void) atoi("1");',
   'system'           : '(void) system("true");',
+  'g_error'          : 'g_error("x");',
   'alloca'           : '(void) alloca(4);',
   'g_newa'           : '(void) g_newa(char, 4);',
   'g_spawn_command_line_async' : '(void) g_spawn_command_line_async("true", nullptr);',
