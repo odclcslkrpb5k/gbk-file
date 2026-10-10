@@ -20,19 +20,16 @@ add_project_arguments(
   '-Wformat=2', '-Werror=format-security',
   '-Wconversion', '-Wsign-conversion',
   '-Wimplicit-fallthrough',
-  '-Wjump-misses-init',            # goto/switch skipping a g_auto* initialisation
   '-Wshadow',
   '-Wvla',
   '-Wnull-dereference',
   '-Wswitch-enum',
   '-Wmissing-prototypes', '-Wstrict-prototypes', '-Wmissing-declarations',
-  '-Wcast-qual', '-Wcast-align=strict',
+  '-Wcast-qual',
   '-Wpointer-arith',
   '-Wwrite-strings',
   '-Wundef',
   '-Wdouble-promotion',
-  '-Wtrampolines',
-  '-Wbidi-chars=any',
   '-Werror=implicit', '-Werror=incompatible-pointer-types', '-Werror=int-conversion',
 
   # Semantics: never let the optimiser exploit UB we might have.
@@ -51,6 +48,24 @@ add_project_arguments(
   '-DGTK_DISABLE_DEPRECATED',
   language : 'c',
 )
+
+# GCC is the compiler for every shipped/tested build. Clang is used only for libFuzzer
+# builds, so GCC-only warnings are skipped there (clang has no equivalent).
+if cc.get_id() == 'gcc'
+  add_project_arguments(
+    '-Wjump-misses-init',            # goto/switch skipping a g_auto* initialisation
+    '-Wcast-align=strict',
+    '-Wtrampolines',
+    '-Wbidi-chars=any',
+    '-Wduplicated-cond', '-Wduplicated-branches', '-Wlogical-op',
+    language : 'c',
+  )
+endif
+
+if get_option('fuzzing')
+  assert(cc.get_id() == 'clang', 'fuzzing builds need clang (libFuzzer)')
+  add_project_arguments('-fsanitize=fuzzer-no-link', language : 'c')
+endif
 
 if get_option('hardening')
   # OpenSSF Compiler Options Hardening Guide (2026-08-20), production set for x86_64.
@@ -112,6 +127,9 @@ banned = {
   'g_timeout_add_seconds' : 'g_timeout_add_seconds(1, nullptr, nullptr);',
   'g_source_attach'  : 'g_source_attach(nullptr, nullptr);',
   'gdk_threads_add_idle' : 'gdk_threads_add_idle(nullptr, nullptr);',
+  'g_unix_fd_add'    : 'g_unix_fd_add(0, G_IO_IN, nullptr, nullptr);',
+  'g_io_add_watch'   : 'g_io_add_watch(nullptr, G_IO_IN, nullptr, nullptr);',
+  'g_child_watch_add' : 'g_child_watch_add(0, nullptr, nullptr);',
 }
 foreach what, code : banned
   if cc.compiles('void f(void); void f(void) { ' + code + ' }',

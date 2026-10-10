@@ -17,12 +17,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/inotify.h>
+#include <sys/syscall.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <glib.h>
+#include <glib-unix.h>
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
@@ -54,7 +58,7 @@
 
 /* --- Raw signal connections and main-loop sources. ---
  * A callback that outlives the object it points at is the classic GTK crash. Use
- * gbk_connect() / gbk_idle_add() / gbk_timeout_add() from lifetime.h: every callback has an
+ * gbk_connect() / gbk_idle_add() / gbk_timeout_add() / gbk_fd_watch() from lifetime.h: every callback has an
  * owner and is disconnected/removed automatically when the owner is destroyed.
  * Only lifetime.c may use the raw APIs. Macros must be #undef'd before poisoning, because
  * GCC does not flag a poisoned name inside a macro defined before the poison. */
@@ -69,6 +73,8 @@
 #pragma GCC poison g_timeout_add g_timeout_add_full g_timeout_add_once
 #pragma GCC poison g_timeout_add_seconds g_timeout_add_seconds_full g_timeout_add_seconds_once
 #pragma GCC poison g_source_attach g_source_set_callback g_source_set_closure
+#pragma GCC poison g_unix_fd_add g_unix_fd_add_full g_unix_signal_add g_unix_signal_add_full
+#pragma GCC poison g_io_add_watch g_io_add_watch_full g_child_watch_add g_child_watch_add_full
 #pragma GCC poison gdk_threads_add_idle gdk_threads_add_idle_full
 #pragma GCC poison gdk_threads_add_timeout gdk_threads_add_timeout_full
 #pragma GCC poison gdk_threads_add_timeout_seconds gdk_threads_add_timeout_seconds_full

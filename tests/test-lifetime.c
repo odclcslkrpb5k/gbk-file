@@ -214,6 +214,48 @@ test_source_cancel (void)
   g_object_unref (owner);
 }
 
+/* ---- fd watches ---- */
+
+static bool
+drain_fd (int fd, GIOCondition condition, void *data)
+{
+  int *counter = data;
+  g_assert_true (condition & G_IO_IN);
+  uint64_t v;
+  g_assert_cmpint (read (fd, &v, sizeof v), ==, (ssize_t) sizeof v);
+  (*counter)++;
+  return true;
+}
+
+static void
+signal_eventfd (int fd)
+{
+  uint64_t one = 1;
+  g_assert_cmpint (write (fd, &one, sizeof one), ==, (ssize_t) sizeof one);
+}
+
+static void
+test_fd_watch (void)
+{
+  int calls = 0;
+  int fd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
+  g_assert_cmpint (fd, >=, 0);
+  GObject *owner = g_object_new (G_TYPE_OBJECT, nullptr);
+
+  gbk_fd_watch (owner, fd, G_IO_IN, drain_fd, &calls);
+  g_assert_cmpint (gbk_lifetime_live (), ==, 1);
+  signal_eventfd (fd);
+  iterate (5);
+  g_assert_cmpint (calls, ==, 1);
+
+  g_object_unref (owner);
+  g_assert_cmpint (gbk_lifetime_live (), ==, 0);
+  signal_eventfd (fd);                    /* owner gone: must not be dispatched */
+  iterate (5);
+  g_assert_cmpint (calls, ==, 1);
+  close (fd);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -228,6 +270,7 @@ main (int argc, char **argv)
   g_test_add_func ("/lifetime/source/owner-run-dispose", test_source_owner_run_dispose);
   g_test_add_func ("/lifetime/source/callback-drops-owner", test_source_callback_drops_owner);
   g_test_add_func ("/lifetime/source/cancel", test_source_cancel);
+  g_test_add_func ("/lifetime/fd/watch", test_fd_watch);
 
   return g_test_run ();
 }

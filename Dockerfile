@@ -10,6 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gcc libc6-dev meson ninja-build pkgconf \
+      clang llvm libclang-rt-dev \
       libgtk-3-dev \
       xvfb xauth \
  && rm -rf /var/lib/apt/lists/*

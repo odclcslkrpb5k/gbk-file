@@ -12,6 +12,7 @@
 
 /* Return true to keep the source, false to remove it. */
 typedef bool (*GbkSourceFunc)(void *data);
+typedef bool (*GbkFdFunc)(int fd, GIOCondition condition, void *data);
 
 /* Connect `callback` to `signal` on `instance`. `data` is passed as the handler's user_data.
  * Returns the handler id (never 0; an invalid signal name is a fatal programming error). */
@@ -24,6 +25,11 @@ gulong gbk_connect_after(GObject *owner, gpointer instance, const char *signal,
  * disposed. Returns a source id usable with gbk_source_cancel(). */
 guint gbk_idle_add(GObject *owner, GbkSourceFunc fn, void *data);
 guint gbk_timeout_add(GObject *owner, guint interval_ms, GbkSourceFunc fn, void *data);
+
+/* Call `fn` whenever `fd` meets `condition`, until it returns false or `owner` is disposed.
+ * Does not take ownership of `fd`: the owner must keep it open while the watch exists,
+ * i.e. close it in dispose/finalize (the watch is gone by then). */
+guint gbk_fd_watch(GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn, void *data);
 
 /* Cancel a source early and zero `*id`. Safe if the source already finished or `*id` is 0. */
 void gbk_source_cancel(guint *id);

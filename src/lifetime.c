@@ -62,7 +62,8 @@ gbk_connect_after (GObject *owner, gpointer instance, const char *signal,
 typedef struct
 {
   GObject *owner;      /* nullptr once the owner has been disposed */
-  GbkSourceFunc fn;
+  GbkSourceFunc fn;    /* exactly one of fn / fd_fn is set */
+  GbkFdFunc fd_fn;
   void *data;
   GSource *source;     /* borrowed; valid until source_destroyed */
 } SourceRec;
@@ -76,18 +77,29 @@ owner_disposed (void *p, GObject *where_the_object_was G_GNUC_UNUSED)
 }
 
 static gboolean
-source_dispatch (void *p)
+dispatch_common (SourceRec *r, int fd, GIOCondition condition)
 {
-  SourceRec *r = p;
   g_assert (r->owner != nullptr);  /* a destroyed source is never dispatched */
 
   /* Hold the owner across the callback: if the callback drops the last other ref, the
-   * owner is disposed at our unref below, after fn has returned. */
+   * owner is disposed at our unref below, after the callback has returned. */
   GObject *owner = g_object_ref (r->owner);
-  bool keep = r->fn (r->data);
+  bool keep = r->fn != nullptr ? r->fn (r->data) : r->fd_fn (fd, condition, r->data);
   g_object_unref (owner);
 
   return (keep && r->owner != nullptr) ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+}
+
+static gboolean
+source_dispatch (void *p)
+{
+  return dispatch_common (p, -1, 0);
+}
+
+static gboolean
+fd_source_dispatch (int fd, GIOCondition condition, void *p)
+{
+  return dispatch_common (p, fd, condition);
 }
 
 static void
@@ -101,20 +113,25 @@ source_destroyed (void *p)
 }
 
 static guint
-add_source (GObject *owner, GSource *source, GbkSourceFunc fn, void *data)
+add_source (GObject *owner, GSource *source, GbkSourceFunc fn, GbkFdFunc fd_fn, void *data)
 {
   g_assert (G_IS_OBJECT (owner));
-  g_assert (fn != nullptr);
+  g_assert ((fn != nullptr) != (fd_fn != nullptr));
 
   SourceRec *r = g_new0 (SourceRec, 1);
   r->owner = owner;
   r->fn = fn;
+  r->fd_fn = fd_fn;
   r->data = data;
   r->source = source;
   g_atomic_int_inc (&live_count);
 
   g_object_weak_ref (owner, owner_disposed, r);
-  g_source_set_callback (source, source_dispatch, r, source_destroyed);
+  /* A unix fd source calls its callback as GUnixFDSourceFunc; G_SOURCE_FUNC is GLib's
+   * sanctioned cast for registering it. */
+  g_source_set_callback (source,
+                         fd_fn != nullptr ? G_SOURCE_FUNC (fd_source_dispatch) : source_dispatch,
+                         r, source_destroyed);
   guint id = g_source_attach (source, nullptr);
   g_source_unref (source);         /* the main context holds it now */
   return id;
@@ -123,13 +140,21 @@ add_source (GObject *owner, GSource *source, GbkSourceFunc fn, void *data)
 guint
 gbk_idle_add (GObject *owner, GbkSourceFunc fn, void *data)
 {
-  return add_source (owner, g_idle_source_new (), fn, data);
+  return add_source (owner, g_idle_source_new (), fn, nullptr, data);
 }
 
 guint
 gbk_timeout_add (GObject *owner, guint interval_ms, GbkSourceFunc fn, void *data)
 {
-  return add_source (owner, g_timeout_source_new (interval_ms), fn, data);
+  return add_source (owner, g_timeout_source_new (interval_ms), fn, nullptr, data);
+}
+
+guint
+gbk_fd_watch (GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn, void *data)
+{
+  g_assert (fd >= 0);
+  g_assert (fn != nullptr);
+  return add_source (owner, g_unix_fd_source_new (fd, condition), nullptr, fn, data);
 }
 
 void

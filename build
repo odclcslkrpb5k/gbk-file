@@ -39,7 +39,7 @@ if [[ -n $(git -C "$root" status --porcelain) ]]; then
 fi
 
 tty=()
-[[ -t 0 && -t 1 ]] && tty=(-it)
+if [[ -t 0 && -t 1 ]]; then tty=(-it); elif [[ $cmd == shell ]]; then tty=(-i); fi
 
 # --network=none: builds are hermetic; nothing can be fetched at build time.
 # --user: run as the invoking user so build output in the repo is owned by them, not root.
