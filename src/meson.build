@@ -7,10 +7,18 @@ lifetime_lib = static_library('gbk-lifetime', 'lifetime.c',
   dependencies : deps,
 )
 
+# Non-GUI core: everything testable without a display.
+core_lib = static_library('gbk-core',
+  'filetype.c',
+  include_directories : config_inc,
+  link_with : lifetime_lib,
+  dependencies : deps,
+)
+
 core_inc = include_directories('.')
 
 executable('gbk-file', 'main.c',
   include_directories : config_inc,
-  link_with : lifetime_lib,
+  link_with : [core_lib, lifetime_lib],
   dependencies : deps,
 )

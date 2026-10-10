@@ -1,0 +1,26 @@
+# comment
+50:application/gzip:*.gz
+50:application/x-compressed-tar:*.tar.gz
+50:application/zip:*.zip
+50:text/x-csrc:*.c:cs
+50:text/x-c++src:*.C:cs
+50:text/x-chdr:*.h
+50:video/mp2t:*.ts
+50:text/vnd.trolltech.linguist:*.ts
+40:text/plain:*.txt
+60:text/x-readme:*.txt
+50:text/x-makefile:makefile
+60:application/x-sharedlib:*.so.[0-9]*
+50:application/x-trash:*~
+50:application/x-shellscript:*.sh
+50:application/x-appimage:*.AppImage
+garbage line
+x:text/plain:*.bad
+50:notamime:*.bad
+50:text/plain:*.b/d
+50:text/plain:*.
+50:text/plain:*.last
+weird.tar.gz
+.hidden
+A.ZIP
+x.C
