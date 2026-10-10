@@ -48,7 +48,15 @@ Primary goal: maximum performance in every scenario + minimal memory footprint.
 - Status bar: "1 folder | Free space: 40.9 GiB".
 - Retro-ish theme (salmon/tan, bold monospace-ish labels) — theme fidelity likely matters.
 
-## Local toolchain (2026-10-10)
+## Build environment (decided 2026-10-10)
+- Everything (build, tests, analyzers, fuzzers) runs in a Docker image defined in-repo.
+  Workstation installs must not matter. Host has Docker 29.8 (rootless). Host = Ubuntu 26.04.1.
+- Base image ubuntu:26.04 pinned by digest so the binary links against the same
+  glibc/GTK as the host. Rebuild image when host distro upgrades.
+- Build system: meson + ninja (proposed; user asked "make or alternative?").
+- User is not a C programmer; relies on me for C good practice. Correctness/safety > convenience.
+
+## Local toolchain (2026-10-10, host — only for reference now)
 gcc 15.2 (default -std=gnu23, has -fanalyzer, -fhardened, -fzero-init-padding-bits),
 glibc 2.43, GTK 3.24.52, GLib 2.88, meson + ninja.
 NOT installed: clang, clang-tidy, valgrind, cppcheck, AFL++. (User must install; I can't write outside repo.)
@@ -77,10 +85,17 @@ Engineer:
   release(OpenSSF 2026-08-20 TL;DR set + -fhardened-ish, FORTIFY=3, auto-var-init=zero).
 - Tests run with G_DEBUG=fatal-warnings,fatal-criticals: any g_return_if_fail = failure.
 - Stress tests: scanner vs. concurrent create/delete/rename storms; inotify overflow (IN_Q_OVERFLOW).
-- Signal/source lifetime: g_signal_connect_object or disconnect in dispose; every
-  g_idle/g_timeout id stored and g_clear_handle_id'd in dispose. Want a test/check for this.
-- Git hooks via core.hooksPath (tracked .githooks/): pre-commit = build+tests,
-  pre-push = analyzer + sanitizer test run. This replaces CI.
+- Signal/source lifetime (user said close this gap, 2026-10-10):
+  Eliminate: all signal connections + idle/timeout sources go through our wrapper module
+  (owner-scoped; auto-disconnect/remove when owner OR instance is disposed, via weak refs).
+  Engineer: lint script (runs in docker check stage) fails if raw g_signal_connect*,
+  g_idle_add*, g_timeout_add*, g_source_attach appear outside the wrapper file.
+  Engineer: debug builds keep a live-registration counter; tests assert zero at teardown
+  and that callbacks never fire after owner dispose.
+- NO git hooks / commit gating (user, 2026-10-10): repo contents don't matter, the BUILT
+  binary does. Gate lives in the release build instead: it runs tests + analyzer + sanitizer
+  suite and refuses to emit a binary unless all pass. Release builds refuse a dirty tree, so
+  the embedded git hash fully identifies the source.
 Protect (deliberate, flagged):
 - -ftrivial-auto-var-init=zero, FORTIFY, stack protector: absorb residual bugs in release.
 - Unavoidable exits: OOM (g_malloc aborts), X server connection loss. Not our code.
