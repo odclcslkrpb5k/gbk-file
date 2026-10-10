@@ -85,7 +85,7 @@ Primary goal: maximum performance in every scenario + minimal memory footprint.
   Workstation installs must not matter. Host has Docker 29.8 (rootless). Host = Ubuntu 26.04.1.
 - Base image ubuntu:26.04 pinned by digest so the binary links against the same
   glibc/GTK as the host. Rebuild image when host distro upgrades.
-- Build system: meson + ninja (proposed; user asked "make or alternative?").
+- Build system: meson + ninja.
 - User is not a C programmer; relies on me for C good practice. Correctness/safety > convenience.
 
 ## Local toolchain (2026-10-10, host — only for reference now)
@@ -100,7 +100,8 @@ Stable target, no new features coming. Fine for us.
 ## Safety plan (proposed 2026-10-10, awaiting user OK)
 Eliminate:
 - No thumbnails/sniffing -> no decoder code of ours. No plugins of our own. (GTK itself still
-  dlopens theme engines/IM modules; -z nodlopen only marks OUR binary non-dlopenable.)
+  dlopens theme engines/IM modules. -z nodlopen is in the OpenSSF set but ld emits no NOOPEN
+  flag for our PIE executable — effectively a no-op; harmless.)
 - File entries live in per-directory-load storage, referenced by (generation,index) handles,
   never raw pointers held across main-loop iterations -> stale-entry UAF can't exist.
 - GTK touched only from main thread; workers send self-contained messages (owned copies).
@@ -132,3 +133,26 @@ Engineer:
 Protect (deliberate, flagged):
 - -ftrivial-auto-var-init=zero, FORTIFY, stack protector: absorb residual bugs in release.
 - Unavoidable exits: OOM (g_malloc aborts), X server connection loss. Not our code.
+
+## Current state of the code (update as it changes)
+Skeleton committed 2026-10-10. `./build {debug|analyze|release|shell|image}`.
+- out/ is build output (NOT build/: the ./build script occupies that name).
+- Docker here is NOT rootless: container runs with --user $(id -u):$(id -g), HOME=/tmp.
+  If out/ ever ends up root-owned, delete it via the container (rm as root inside).
+- meson: get_option() can't be used inside project(); option named 'version' is rejected
+  -> ours is 'build_id'. Toolchain-pinned flags are required, not probed.
+- src/prelude.h is force-included (-include) in every TU: all system headers, then
+  #pragma GCC poison bans. New system header? add it to prelude ABOVE the poison block.
+  Macros must be #undef'd before poisoning (GCC ignores poisoned names inside macros
+  defined earlier). meson.build has configure-time probes: each ban must fail to compile
+  (and a baseline must compile). Add a probe whenever adding a ban.
+- g_error is banned (its for(;;) trips -fanalyzer). Use gbk_fatal() (src/fatal.h).
+- src/lifetime.{h,c}: gbk_connect / gbk_connect_after / gbk_idle_add / gbk_timeout_add /
+  gbk_source_cancel / gbk_lifetime_live. Only lifetime.c (built with -DGBK_LIFETIME_IMPL)
+  may use raw g_signal_connect*/g_idle_add*/g_timeout_add*/g_source_attach.
+  main() calls gbk_fatal if gbk_lifetime_live() != 0 after the app is freed.
+- Tests: tests/test-<name>.c, add name to the foreach in tests/meson.build. Run with
+  G_DEBUG=fatal-warnings,fatal-criticals and strict ASan/UBSan options.
+- Release = debug tests + analyzer + hardened (-O2 -g, asserts ON via b_ndebug=false) + tests.
+- Image currently has gcc/meson/gtk-dev/xvfb only. clang/clang-tidy/valgrind/fuzzer to be
+  added when we have parsers to fuzz (type table, config).
