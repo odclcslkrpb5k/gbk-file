@@ -27,8 +27,10 @@ guint gbk_idle_add(GObject *owner, GbkSourceFunc fn, void *data);
 guint gbk_timeout_add(GObject *owner, guint interval_ms, GbkSourceFunc fn, void *data);
 
 /* Call `fn` whenever `fd` meets `condition`, until it returns false or `owner` is disposed.
- * Does not take ownership of `fd`: the owner must keep it open while the watch exists,
- * i.e. close it in dispose/finalize (the watch is gone by then). */
+ * Does not take ownership of `fd`, which must stay open while the watch exists. The watch
+ * is removed when the owner's dispose chains up to GObject's, so a subclass dispose that
+ * closes the fd *before* chaining up must gbk_source_cancel() the watch first. Closing it
+ * in finalize is always safe. */
 guint gbk_fd_watch(GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn, void *data);
 
 /* Cancel a source early and zero `*id`. Safe if the source already finished or `*id` is 0. */

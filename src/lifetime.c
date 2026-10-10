@@ -99,6 +99,10 @@ source_dispatch (void *p)
 static gboolean
 fd_source_dispatch (int fd, GIOCondition condition, void *p)
 {
+  /* G_IO_NVAL: the fd was closed while still watched. Its number may already belong to
+   * something else, so carrying on would read the wrong file. Always a lifetime bug. */
+  if (condition & G_IO_NVAL)
+    gbk_fatal ("fd watch on closed fd %d", fd);
   return dispatch_common (p, fd, condition);
 }
 

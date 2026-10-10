@@ -11,8 +11,8 @@ test_env.set('XDG_DATA_HOME', '/nonexistent/data')
 test_libs = [core_lib, lifetime_lib]
 test_inc = [config_inc, core_inc]
 
-unit_tests = ['lifetime', 'filetype', 'natsort']
-fuzz_targets = ['filetype', 'natsort']
+unit_tests = ['lifetime', 'filetype', 'natsort', 'dirmodel', 'scanner']
+fuzz_targets = ['filetype', 'natsort', 'inotify', 'entry']
 
 if not get_option('fuzzing')
   foreach name : unit_tests

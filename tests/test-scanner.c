@@ -1,0 +1,405 @@
+/* Directory model + scanner against a real filesystem (temp dirs inside the container). */
+#include "dirmodel.h"
+#include "lifetime.h"
+
+static GbkTypeTable *types;
+
+/* ---- helpers ---- */
+
+typedef bool (*Pred) (void *data);
+
+static bool
+wait_until (Pred pred, void *data, int timeout_ms)
+{
+  int64_t deadline = g_get_monotonic_time () + (int64_t) timeout_ms * 1000;
+  while (g_get_monotonic_time () < deadline)
+    {
+      while (g_main_context_iteration (nullptr, false))
+        ;
+      if (pred (data))
+        return true;
+      g_usleep (1000);
+    }
+  return pred (data);
+}
+
+static bool
+is_ready (void *data)
+{
+  return gbk_dir_model_state (data) == GBK_DIR_READY;
+}
+
+static bool
+not_loading (void *data)
+{
+  return gbk_dir_model_state (data) != GBK_DIR_LOADING;
+}
+
+static bool
+is_gone (void *data)
+{
+  return gbk_dir_model_state (data) == GBK_DIR_GONE;
+}
+
+static bool
+no_workers (void *data G_GNUC_UNUSED)
+{
+  return gbk_scanner_live_workers () == 0;
+}
+
+static void
+put (const char *dir, const char *name)
+{
+  g_autofree char *path = g_build_filename (dir, name, nullptr);
+  int fd = open (path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+  g_assert_cmpint (fd, >=, 0);
+  close (fd);
+}
+
+static void
+rm_rf (const char *path)
+{
+  struct stat st;
+  if (lstat (path, &st) != 0)
+    return;
+  if (S_ISDIR (st.st_mode))
+    {
+      chmod (path, 0700);
+      g_autoptr (GDir) d = g_dir_open (path, 0, nullptr);
+      const char *name;
+      while (d != nullptr && (name = g_dir_read_name (d)) != nullptr)
+        {
+          g_autofree char *child = g_build_filename (path, name, nullptr);
+          rm_rf (child);
+        }
+      rmdir (path);
+    }
+  else
+    unlink (path);
+}
+
+static char *
+mktmp (void)
+{
+  g_autoptr (GError) error = nullptr;
+  char *dir = g_dir_make_tmp ("gbk-test-XXXXXX", &error);
+  g_assert_no_error (error);
+  return dir;
+}
+
+typedef struct
+{
+  GbkDirModel *m;
+  const char *dir;
+} MatchCtx;
+
+/* True when the model holds exactly the directory's current entries. */
+static bool
+model_matches_fs (void *data)
+{
+  MatchCtx *c = data;
+  DIR *d = opendir (c->dir);
+  if (d == nullptr)
+    gbk_fatal ("opendir %s: %s", c->dir, g_strerror (errno));
+  size_t n = 0;
+  bool ok = true;
+  struct dirent *de;
+  while ((de = readdir (d)) != nullptr)
+    {
+      if (g_str_equal (de->d_name, ".") || g_str_equal (de->d_name, ".."))
+        continue;
+      n++;
+      if (gbk_dir_model_get (c->m, gbk_dir_model_find (c->m, de->d_name)) == nullptr)
+        ok = false;
+    }
+  closedir (d);
+  return ok && n == gbk_dir_model_n_entries (c->m);
+}
+
+static const GbkEntry *
+get (GbkDirModel *m, const char *name)
+{
+  return gbk_dir_model_get (m, gbk_dir_model_find (m, name));
+}
+
+/* ---- tests ---- */
+
+static void
+test_initial_listing (void)
+{
+  g_autofree char *dir = mktmp ();
+  put (dir, "a.txt");
+  put (dir, ".hidden");
+  g_autofree char *sub = g_build_filename (dir, "sub", nullptr);
+  g_assert_cmpint (mkdir (sub, 0755), ==, 0);
+  g_autofree char *link = g_build_filename (dir, "link-to-sub", nullptr);
+  g_assert_cmpint (symlink ("sub", link), ==, 0);
+  g_autofree char *broken = g_build_filename (dir, "broken", nullptr);
+  g_assert_cmpint (symlink ("does-not-exist", broken), ==, 0);
+  g_autofree char *fifo = g_build_filename (dir, "pipe", nullptr);
+  g_assert_cmpint (mkfifo (fifo, 0644), ==, 0);
+  put (dir, "bad\xff\xfename");
+  g_autofree char *exe = g_build_filename (dir, "prog", nullptr);
+  put (dir, "prog");
+  g_assert_cmpint (chmod (exe, 0755), ==, 0);
+
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  g_assert_true (gbk_dir_model_live (m));
+  g_assert_cmpuint (gbk_dir_model_n_entries (m), ==, 8);
+  g_assert_cmpuint (gbk_dir_model_n_visible (m), ==, 7);    /* .hidden filtered */
+
+  g_assert_cmpint (get (m, "sub")->kind, ==, GBK_KIND_DIRECTORY);
+  g_assert_cmpint (get (m, "link-to-sub")->kind, ==, GBK_KIND_DIRECTORY);
+  g_assert_true (get (m, "link-to-sub")->flags & GBK_ENTRY_SYMLINK);
+  g_assert_cmpint (get (m, "broken")->kind, ==, GBK_KIND_BROKEN_LINK);
+  g_assert_cmpint (get (m, "pipe")->kind, ==, GBK_KIND_FIFO);
+  g_assert_true (get (m, ".hidden")->flags & GBK_ENTRY_HIDDEN);
+  g_assert_cmpstr (gbk_type_table_mime (types, get (m, "a.txt")->type), ==, "text/plain");
+  g_assert_cmpstr (gbk_type_table_mime (types, get (m, "prog")->type), ==,
+                   "application/x-executable");
+  const GbkEntry *bad = get (m, "bad\xff\xfename");
+  g_assert_nonnull (bad);
+  g_assert_true (g_utf8_validate (gbk_entry_display (bad), -1, nullptr));
+  g_assert_cmpstr (gbk_entry_display (bad), !=, gbk_entry_name (bad));
+  gbk_dir_model_check_order (m);
+
+  g_clear_object (&m);
+  rm_rf (dir);
+}
+
+static bool
+first_mtime_updated (void *data)
+{
+  const GbkEntry *e = get (data, "first");
+  return e != nullptr && e->mtime_ns == 1000000000000LL;
+}
+
+static void
+test_live_updates (void)
+{
+  g_autofree char *dir = mktmp ();
+  put (dir, "first");
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  MatchCtx c = { m, dir };
+
+  put (dir, "created");
+  g_assert_true (wait_until (model_matches_fs, &c, 5000));
+  g_assert_nonnull (get (m, "created"));
+
+  GbkHandle first = gbk_dir_model_find (m, "first");
+  g_autofree char *p1 = g_build_filename (dir, "first", nullptr);
+  struct timespec ts[2] = { { .tv_sec = 1000 }, { .tv_sec = 1000 } };
+  g_assert_cmpint (utimensat (AT_FDCWD, p1, ts, 0), ==, 0);
+  g_assert_true (wait_until (first_mtime_updated, m, 5000));
+  g_assert_cmpint (get (m, "first")->mtime_ns, ==, 1000000000000LL);
+  g_assert_nonnull (gbk_dir_model_get (m, first));    /* update kept the handle */
+
+  g_autofree char *p2 = g_build_filename (dir, "renamed", nullptr);
+  g_assert_cmpint (rename (p1, p2), ==, 0);
+  g_assert_true (wait_until (model_matches_fs, &c, 5000));
+  g_assert_null (gbk_dir_model_get (m, first));       /* old name: handle is stale */
+  g_assert_nonnull (get (m, "renamed"));
+
+  g_autofree char *p3 = g_build_filename (dir, "created", nullptr);
+  g_assert_cmpint (unlink (p3), ==, 0);
+  g_autofree char *p4 = g_build_filename (dir, "newdir", nullptr);
+  g_assert_cmpint (mkdir (p4, 0755), ==, 0);
+  g_assert_true (wait_until (model_matches_fs, &c, 5000));
+  g_assert_cmpint (get (m, "newdir")->kind, ==, GBK_KIND_DIRECTORY);
+  gbk_dir_model_check_order (m);
+
+  g_clear_object (&m);
+  rm_rf (dir);
+}
+
+static void
+test_large_directory (void)
+{
+  g_autofree char *dir = mktmp ();
+  for (int i = 0; i < 20000; i++)
+    {
+      char name[32];
+      g_snprintf (name, sizeof name, "f%05d.txt", i);
+      put (dir, name);
+    }
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 30000));
+  g_assert_cmpuint (gbk_dir_model_n_visible (m), ==, 20000);
+  gbk_dir_model_check_order (m);
+  g_assert_cmpstr (gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0))),
+                   ==, "f00000.txt");
+  g_clear_object (&m);
+  rm_rf (dir);
+}
+
+typedef struct
+{
+  const char *dir;
+  int ops;
+  int done;     /* atomic */
+} StormCtx;
+
+static void *
+storm (void *data)
+{
+  StormCtx *s = data;
+  GRand *r = g_rand_new_with_seed (777);
+  for (int i = 0; i < s->ops; i++)
+    {
+      char a[64], b[64];
+      g_snprintf (a, sizeof a, "%s/n%d", s->dir, g_rand_int_range (r, 0, 500));
+      g_snprintf (b, sizeof b, "%s/n%d", s->dir, g_rand_int_range (r, 0, 500));
+      switch (g_rand_int_range (r, 0, 4))
+        {
+        case 0:
+          {
+            int fd = open (a, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+            if (fd >= 0)
+              close (fd);
+            break;
+          }
+        case 1: unlink (a); break;
+        case 2: rename (a, b); break;
+        default: mkdir (a, 0755) == 0 ? (void) rmdir (a) : (void) 0; break;
+        }
+    }
+  g_rand_free (r);
+  g_atomic_int_set (&s->done, 1);
+  return nullptr;
+}
+
+static void
+run_storm (unsigned pending_max)
+{
+  g_autofree char *dir = mktmp ();
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  gbk_scanner_set_pending_max_for_test (pending_max);
+  int rescans_before = gbk_scanner_rescans ();
+
+  StormCtx s = { .dir = dir, .ops = 30000 };
+  GThread *t = g_thread_new ("storm", storm, &s);
+  /* Keep the main loop running while the storm rages, like the real UI would, checking
+   * the model's invariants as every batch lands. */
+  while (!g_atomic_int_get (&s.done))
+    {
+      while (g_main_context_iteration (nullptr, false))
+        gbk_dir_model_check_order (m);
+      g_usleep (500);
+    }
+  g_thread_join (t);
+
+  MatchCtx c = { m, dir };
+  g_assert_true (wait_until (model_matches_fs, &c, 10000));
+  gbk_dir_model_check_order (m);
+  if (pending_max < GBK_SCAN_PENDING_MAX)
+    g_assert_cmpint (gbk_scanner_rescans (), >, rescans_before);
+  gbk_scanner_set_pending_max_for_test (GBK_SCAN_PENDING_MAX);
+
+  g_clear_object (&m);
+  rm_rf (dir);
+}
+
+static void
+test_storm_deltas (void)
+{
+  run_storm (GBK_SCAN_PENDING_MAX);
+}
+
+static void
+test_storm_rescans (void)
+{
+  run_storm (8);     /* nearly every batch overflows the cap: exercise rescans hard */
+}
+
+static void
+test_gone (void)
+{
+  g_autofree char *parent = mktmp ();
+  g_autofree char *dir = g_build_filename (parent, "victim", nullptr);
+  g_assert_cmpint (mkdir (dir, 0755), ==, 0);
+  put (dir, "x");
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  rm_rf (dir);
+  g_assert_true (wait_until (is_gone, m, 5000));
+  g_assert_false (gbk_dir_model_live (m));
+  g_clear_object (&m);
+  rm_rf (parent);
+}
+
+static void
+test_errors (void)
+{
+  g_autoptr (GbkDirModel) missing = gbk_dir_model_new ("/nonexistent/gbk/dir", types);
+  g_assert_true (wait_until (not_loading, missing, 5000));
+  g_assert_cmpint (gbk_dir_model_state (missing), ==, GBK_DIR_ERROR);
+  g_assert_cmpint (gbk_dir_model_error (missing), ==, ENOENT);
+
+  g_autofree char *file_dir = mktmp ();
+  put (file_dir, "plain");
+  g_autofree char *plain = g_build_filename (file_dir, "plain", nullptr);
+  g_autoptr (GbkDirModel) notdir = gbk_dir_model_new (plain, types);
+  g_assert_true (wait_until (not_loading, notdir, 5000));
+  g_assert_cmpint (gbk_dir_model_error (notdir), ==, ENOTDIR);
+
+  if (geteuid () != 0)
+    {
+      g_autofree char *locked = g_build_filename (file_dir, "locked", nullptr);
+      g_assert_cmpint (mkdir (locked, 0000), ==, 0);
+      g_autoptr (GbkDirModel) denied = gbk_dir_model_new (locked, types);
+      g_assert_true (wait_until (not_loading, denied, 5000));
+      g_assert_cmpint (gbk_dir_model_state (denied), ==, GBK_DIR_ERROR);
+      g_assert_cmpint (gbk_dir_model_error (denied), ==, EACCES);
+    }
+  rm_rf (file_dir);
+}
+
+static void
+test_cancel_mid_scan (void)
+{
+  g_autofree char *dir = mktmp ();
+  for (int i = 0; i < 30000; i++)
+    {
+      char name[32];
+      g_snprintf (name, sizeof name, "f%d", i);
+      put (dir, name);
+    }
+  for (int round = 0; round < 50; round++)
+    {
+      GbkDirModel *m = gbk_dir_model_new (dir, types);
+      for (int i = 0; i < round % 5; i++)
+        g_main_context_iteration (nullptr, false);
+      g_object_unref (m);
+    }
+  g_assert_true (wait_until (no_workers, nullptr, 30000));
+  rm_rf (dir);
+}
+
+int
+main (int argc, char **argv)
+{
+  g_test_init (&argc, &argv, nullptr);
+  const char globs[] = "50:text/plain:*.txt\n";
+  GbkTypeBuilder *b = gbk_type_builder_new ();
+  gbk_type_builder_load_globs2 (b, globs, strlen (globs));
+  types = gbk_type_builder_finish (b);
+
+  g_test_add_func ("/scanner/initial-listing", test_initial_listing);
+  g_test_add_func ("/scanner/live-updates", test_live_updates);
+  g_test_add_func ("/scanner/large-directory", test_large_directory);
+  g_test_add_func ("/scanner/storm-deltas", test_storm_deltas);
+  g_test_add_func ("/scanner/storm-rescans", test_storm_rescans);
+  g_test_add_func ("/scanner/gone", test_gone);
+  g_test_add_func ("/scanner/errors", test_errors);
+  g_test_add_func ("/scanner/cancel-mid-scan", test_cancel_mid_scan);
+  int status = g_test_run ();
+
+  /* Workers are detached: let them all finish so the leak checker sees a clean exit. */
+  g_assert_true (wait_until (no_workers, nullptr, 30000));
+  g_assert_cmpint (gbk_lifetime_live (), ==, 0);
+  gbk_type_table_unref (types);
+  return status;
+}

@@ -41,6 +41,7 @@ add_project_arguments(
   # Threads with glibc pthreads (OpenSSF).
   '-fexceptions',
 
+  '-D_GNU_SOURCE',                 # statx, O_* flags
   '-DG_LOG_DOMAIN="gbk"',
   '-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_88',
   '-DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_88',

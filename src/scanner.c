@@ -1,0 +1,441 @@
+#include "scanner.h"
+#include "inotify-parse.h"
+
+#define WATCH_MASK (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB \
+                    | IN_CLOSE_WRITE | IN_MODIFY | IN_DELETE_SELF | IN_MOVE_SELF | IN_ONLYDIR)
+#define SELF_GONE_MASK (IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_IGNORED)
+
+struct GbkScanner
+{
+  gatomicrefcount rc;     /* one for the main thread, one for the worker */
+  int cancelled;          /* atomic */
+  GAsyncQueue *queue;     /* GbkScanMsg*; leftovers freed with the queue */
+  int wake_fd;            /* eventfd: worker -> main */
+  int cancel_fd;          /* eventfd: main -> worker */
+  char *path;
+  GbkTypeTable *types;
+};
+
+static int live_workers;
+static int pending_max = GBK_SCAN_PENDING_MAX;        /* atomic */
+static int rescans;                                   /* atomic */
+
+void
+gbk_scanner_set_pending_max_for_test (unsigned n)
+{
+  g_atomic_int_set (&pending_max, (int) MIN (n, (unsigned) INT_MAX));
+}
+
+int
+gbk_scanner_rescans (void)
+{
+  return g_atomic_int_get (&rescans);
+}
+
+int
+gbk_scanner_live_workers (void)
+{
+  return g_atomic_int_get (&live_workers);
+}
+
+void
+gbk_scan_msg_free (GbkScanMsg *m)
+{
+  if (m == nullptr)
+    return;
+  g_ptr_array_unref (m->upserts);
+  g_ptr_array_unref (m->removes);
+  g_free (m);
+}
+
+static GbkScanMsg *
+msg_new (GbkScanMsgType type)
+{
+  GbkScanMsg *m = g_new0 (GbkScanMsg, 1);
+  m->type = type;
+  m->upserts = g_ptr_array_new_with_free_func ((GDestroyNotify) gbk_entry_free);
+  m->removes = g_ptr_array_new_with_free_func (g_free);
+  return m;
+}
+
+static void
+scanner_unref (GbkScanner *s)
+{
+  if (!g_atomic_ref_count_dec (&s->rc))
+    return;
+  g_async_queue_unref (s->queue);
+  close (s->wake_fd);
+  close (s->cancel_fd);
+  g_free (s->path);
+  gbk_type_table_unref (s->types);
+  g_free (s);
+}
+
+static bool
+is_cancelled (GbkScanner *s)
+{
+  return g_atomic_int_get (&s->cancelled) != 0;
+}
+
+static void
+eventfd_signal (int fd)
+{
+  uint64_t one = 1;
+  /* Can only fail if the counter would overflow (it won't: consumers reset it) or with
+   * EINTR; either way the fd is already readable or the next signal will make it so. */
+  while (write (fd, &one, sizeof one) < 0 && errno == EINTR)
+    ;
+}
+
+static void
+push (GbkScanner *s, GbkScanMsg *m)
+{
+  if (is_cancelled (s))
+    {
+      gbk_scan_msg_free (m);
+      return;
+    }
+  g_async_queue_push (s->queue, m);
+  eventfd_signal (s->wake_fd);
+}
+
+static void
+push_error (GbkScanner *s, GbkScanMsgType type, int error)
+{
+  GbkScanMsg *m = msg_new (type);
+  m->error = error;
+  push (s, m);
+}
+
+/* ---- Full scan ---- */
+
+/* Sends the directory as a CHUNK sequence. Returns false if cancelled or unreadable (an
+ * ERROR has been sent in the latter case). */
+static bool
+full_scan (GbkScanner *s, int dirfd, bool live)
+{
+  /* A fresh open file description, not dup(): a dup shares the directory offset, so a
+   * rescan would start reading where the previous scan ended (i.e. see nothing). */
+  int fd = openat (dirfd, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  DIR *dir = fd >= 0 ? fdopendir (fd) : nullptr;
+  if (dir == nullptr)
+    {
+      int err = errno;
+      if (fd >= 0)
+        close (fd);
+      push_error (s, GBK_SCAN_ERROR, err);
+      return false;
+    }
+
+  GbkScanMsg *chunk = msg_new (GBK_SCAN_CHUNK);
+  chunk->first = true;
+  chunk->live = live;
+  size_t limit = GBK_SCAN_FIRST_CHUNK;
+  bool ok = true;
+
+  for (;;)
+    {
+      errno = 0;
+      struct dirent *d = readdir (dir);
+      if (d == nullptr)
+        {
+          if (errno != 0)
+            {
+              /* Mid-listing failure (e.g. EIO). Send what we have as a complete snapshot
+               * rather than nothing; a later event or rescan can fill the rest. */
+              g_warning ("readdir %s: %s", s->path, g_strerror (errno));
+            }
+          break;
+        }
+      if (is_cancelled (s))
+        {
+          ok = false;
+          break;
+        }
+      if (g_str_equal (d->d_name, ".") || g_str_equal (d->d_name, ".."))
+        continue;
+
+      GbkEntry *e = gbk_entry_new_at (dirfd, d->d_name, d->d_type, s->types);
+      if (e == nullptr)
+        continue;                     /* vanished since readdir */
+      g_ptr_array_add (chunk->upserts, e);
+
+      if (chunk->upserts->len >= limit)
+        {
+          push (s, chunk);
+          chunk = msg_new (GBK_SCAN_CHUNK);
+          chunk->live = live;
+          limit = GBK_SCAN_CHUNK_MAX;
+        }
+    }
+  closedir (dir);
+
+  if (!ok)
+    {
+      gbk_scan_msg_free (chunk);
+      return false;
+    }
+  chunk->last = true;
+  push (s, chunk);
+  return true;
+}
+
+/* ---- Live updates ---- */
+
+typedef struct
+{
+  GHashTable *names;    /* owned raw names whose state must be re-read */
+  bool overflow;
+  bool gone;
+  bool self_attrib;     /* the directory's own attributes changed (maybe its link count) */
+} Pending;
+
+static void
+on_inotify_event (uint32_t mask, const char *name, size_t name_len, void *data)
+{
+  Pending *p = data;
+  if (mask & IN_Q_OVERFLOW)
+    p->overflow = true;
+  if (mask & SELF_GONE_MASK)
+    p->gone = true;
+  if (name == nullptr && (mask & IN_ATTRIB))
+    p->self_attrib = true;
+  if (name != nullptr && !p->overflow)
+    {
+      if (g_hash_table_size (p->names) >= (guint) g_atomic_int_get (&pending_max))
+        p->overflow = true;            /* a storm: one rescan is cheaper than N statx */
+      else
+        g_hash_table_add (p->names, g_strndup (name, name_len));
+    }
+}
+
+/* Reads everything currently queued on the inotify fd. Returns false on a fatal error. */
+static bool
+drain_inotify (int ifd, Pending *p)
+{
+  alignas (struct inotify_event) uint8_t buf[65536];
+  for (;;)
+    {
+      ssize_t n = read (ifd, buf, sizeof buf);
+      if (n < 0)
+        {
+          if (errno == EINTR)
+            continue;
+          if (errno == EAGAIN)
+            return true;
+          return false;
+        }
+      if (n == 0)
+        return true;
+      if (!gbk_inotify_parse (buf, (size_t) n, on_inotify_event, p))
+        p->overflow = true;            /* can't trust what we got: rescan */
+    }
+}
+
+static void
+send_delta (GbkScanner *s, int dirfd, Pending *p)
+{
+  GbkScanMsg *m = msg_new (GBK_SCAN_DELTA);
+  GHashTableIter it;
+  void *key;
+  g_hash_table_iter_init (&it, p->names);
+  while (g_hash_table_iter_next (&it, &key, nullptr))
+    {
+      const char *name = key;
+      GbkEntry *e = gbk_entry_new_at (dirfd, name, DT_UNKNOWN, s->types);
+      if (e != nullptr)
+        g_ptr_array_add (m->upserts, e);
+      else
+        g_ptr_array_add (m->removes, g_strdup (name));
+    }
+  g_hash_table_remove_all (p->names);
+  if (m->upserts->len > 0 || m->removes->len > 0)
+    push (s, m);
+  else
+    gbk_scan_msg_free (m);
+}
+
+static int64_t
+now_ms (void)
+{
+  return g_get_monotonic_time () / 1000;
+}
+
+/* Waits for inotify activity or cancellation. timeout_ms < 0 waits forever.
+ * Returns false if cancelled. */
+static bool
+wait_events (GbkScanner *s, int ifd, int timeout_ms)
+{
+  struct pollfd fds[2] = {
+    { .fd = s->cancel_fd, .events = POLLIN },
+    { .fd = ifd, .events = POLLIN },
+  };
+  nfds_t n = ifd >= 0 ? 2 : 1;
+  while (poll (fds, n, timeout_ms) < 0 && errno == EINTR)
+    ;
+  return !is_cancelled (s);
+}
+
+static void
+watch_loop (GbkScanner *s, int ifd, int dirfd)
+{
+  Pending p = { .names = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, nullptr) };
+
+  while (!is_cancelled (s))
+    {
+      if (!wait_events (s, ifd, -1))
+        break;
+      if (!drain_inotify (ifd, &p))
+        {
+          push_error (s, GBK_SCAN_ERROR, errno);
+          break;
+        }
+
+      /* Coalesce: keep collecting until things go quiet or the oldest event is too old. */
+      int64_t deadline = now_ms () + GBK_SCAN_MAX_DELAY_MS;
+      while (!p.gone && !p.overflow)
+        {
+          int64_t left = deadline - now_ms ();
+          if (left <= 0)
+            break;
+          struct pollfd pf = { .fd = ifd, .events = POLLIN };
+          int r = poll (&pf, 1, (int) MIN (left, GBK_SCAN_QUIET_MS));
+          if (r <= 0)
+            break;                     /* quiet (or error): flush now */
+          if (!drain_inotify (ifd, &p))
+            break;
+        }
+      if (is_cancelled (s))
+        break;
+
+      /* We hold the directory open, so deleting it can't free the inode and the kernel
+       * never sends IN_DELETE_SELF. rmdir does send IN_ATTRIB (link count change) on the
+       * directory itself: a link count of 0 means it's gone. */
+      if (p.self_attrib)
+        {
+          p.self_attrib = false;
+          struct stat st;
+          if (fstat (dirfd, &st) == 0 && st.st_nlink == 0)
+            p.gone = true;
+        }
+
+      if (p.gone)
+        {
+          push_error (s, GBK_SCAN_GONE, 0);
+          break;
+        }
+      if (p.overflow)
+        {
+          /* Drop everything queued so far; the rescan supersedes it. Events arriving after
+           * this drain are picked up by the next loop iteration. */
+          drain_inotify (ifd, &p);
+          p.overflow = false;
+          g_hash_table_remove_all (p.names);
+          if (p.gone)
+            {
+              push_error (s, GBK_SCAN_GONE, 0);
+              break;
+            }
+          g_atomic_int_inc (&rescans);
+          if (!full_scan (s, dirfd, true))
+            break;
+          continue;
+        }
+      send_delta (s, dirfd, &p);
+    }
+
+  g_hash_table_unref (p.names);
+}
+
+static void *
+worker (void *data)
+{
+  GbkScanner *s = data;
+
+  /* Watch before scanning, so nothing created during the scan is missed. */
+  int ifd = inotify_init1 (IN_NONBLOCK | IN_CLOEXEC);
+  bool live = false;
+  if (ifd >= 0)
+    live = inotify_add_watch (ifd, s->path, WATCH_MASK) >= 0;
+  /* No watch (e.g. fs.inotify.max_user_watches exhausted): still list, just not live. */
+
+  int dirfd = open (s->path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (dirfd < 0)
+    push_error (s, GBK_SCAN_ERROR, errno);
+  else
+    {
+      if (full_scan (s, dirfd, live) && live)
+        watch_loop (s, ifd, dirfd);
+      close (dirfd);
+    }
+
+  if (ifd >= 0)
+    close (ifd);
+  scanner_unref (s);
+  g_atomic_int_dec_and_test (&live_workers);
+  return nullptr;
+}
+
+GbkScanner *
+gbk_scanner_start (const char *path, GbkTypeTable *types)
+{
+  GbkScanner *s = g_new0 (GbkScanner, 1);
+  g_atomic_ref_count_init (&s->rc);
+  s->queue = g_async_queue_new_full ((GDestroyNotify) gbk_scan_msg_free);
+  s->path = g_strdup (path);
+  s->types = gbk_type_table_ref (types);
+  s->wake_fd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
+  s->cancel_fd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
+  if (s->wake_fd < 0 || s->cancel_fd < 0)
+    gbk_fatal ("eventfd: %s", g_strerror (errno));   /* fd exhaustion: nothing sane to do */
+
+  g_atomic_ref_count_inc (&s->rc);            /* the worker's reference */
+  g_atomic_int_inc (&live_workers);
+  g_autoptr (GError) error = nullptr;
+  GThread *t = g_thread_try_new ("gbk-scan", worker, s, &error);
+  if (t == nullptr)
+    {
+      g_atomic_int_dec_and_test (&live_workers);
+      scanner_unref (s);                      /* the worker's reference, never used */
+      push_error (s, GBK_SCAN_ERROR, EAGAIN);
+    }
+  else
+    g_thread_unref (t);                       /* detached */
+  return s;
+}
+
+int
+gbk_scanner_wake_fd (const GbkScanner *s)
+{
+  return s->wake_fd;
+}
+
+void
+gbk_scanner_ack (GbkScanner *s)
+{
+  uint64_t v;
+  while (read (s->wake_fd, &v, sizeof v) < 0 && errno == EINTR)
+    ;
+}
+
+GbkScanMsg *
+gbk_scanner_pop (GbkScanner *s)
+{
+  return g_async_queue_try_pop (s->queue);
+}
+
+void
+gbk_scanner_rearm (GbkScanner *s)
+{
+  eventfd_signal (s->wake_fd);
+}
+
+void
+gbk_scanner_stop (GbkScanner *s)
+{
+  if (s == nullptr)
+    return;
+  g_atomic_int_set (&s->cancelled, 1);
+  eventfd_signal (s->cancel_fd);
+  scanner_unref (s);
+}
