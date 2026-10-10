@@ -1,4 +1,4 @@
-deps = [glib_dep, gobject_dep, gtk_dep]
+deps = [glib_dep, gobject_dep, gtk_dep, cc.find_library('m')]
 
 # lifetime.c is the only file allowed to use the raw signal/source APIs (see prelude.h).
 lifetime_lib = static_library('gbk-lifetime', 'lifetime.c',
@@ -22,10 +22,21 @@ core_lib = static_library('gbk-core',
   dependencies : deps,
 )
 
+# GUI: needs a display (tests run under Xvfb).
+gui_lib = static_library('gbk-gui',
+  'context.c',
+  'launch.c',
+  'view.c',
+  'window.c',
+  include_directories : config_inc,
+  link_with : [core_lib, lifetime_lib],
+  dependencies : deps,
+)
+
 core_inc = include_directories('.')
 
 executable('gbk-file', 'main.c',
   include_directories : config_inc,
-  link_with : [core_lib, lifetime_lib],
+  link_with : [gui_lib, core_lib, lifetime_lib],
   dependencies : deps,
 )

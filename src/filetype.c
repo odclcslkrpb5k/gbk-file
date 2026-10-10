@@ -337,6 +337,12 @@ load_file (GbkTypeBuilder *b, const char *dir, const char *name, bool globs)
 GbkTypeTable *
 gbk_type_table_new_system (void)
 {
+  return gbk_type_builder_finish (gbk_type_builder_new_system ());
+}
+
+GbkTypeBuilder *
+gbk_type_builder_new_system (void)
+{
   GbkTypeBuilder *b = gbk_type_builder_new ();
   /* User dir first: earlier mappings win weight ties. For generic icons, later wins, so
    * load in reverse. */
@@ -350,7 +356,7 @@ gbk_type_table_new_system (void)
   for (size_t i = n_sys; i > 0; i--)
     load_file (b, sys[i - 1], "generic-icons", false);
   load_file (b, g_get_user_data_dir (), "generic-icons", false);
-  return gbk_type_builder_finish (b);
+  return b;
 }
 
 GbkTypeTable *

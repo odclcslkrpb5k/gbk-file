@@ -152,6 +152,12 @@ Protect (deliberate, flagged):
 - g_assert_* in tests can return (non-fatal mode): don't deref after g_assert_nonnull;
   use if (!x) gbk_fatal(...). The analyzer catches this.
 - memcmp/memcpy with an empty GArray: data may be nullptr -> UB even with len 0. Guard.
+- pthread_cancel/pthread_exit/g_thread_exit are banned. -fexceptions is on for every build
+  EXCEPT analyze (with it, -fanalyzer reports leaks on impossible unwind paths).
+- LSan: tests/lsan.supp suppresses ONLY libfontconfig (its cache is never freed). Never add
+  broad suppressions (libgtk, libpango): they'd hide our own GObject leaks.
+- Screenshots: GUI tests write PNGs to out/artifacts/. The Read tool shows them downscaled —
+  zoom/crop with PIL before judging colours (I once "fixed" white text that was fine).
 
 Modules (src/, all in libgbk-core except lifetime):
 - lifetime: gbk_connect[_after], gbk_idle_add, gbk_timeout_add, gbk_fd_watch,
@@ -169,8 +175,15 @@ Modules (src/, all in libgbk-core except lifetime):
   eventfd. CHUNK(first..last)=snapshot, DELTA, ERROR, GONE. Coalesce 10ms quiet/50ms max.
   >PENDING_MAX names or IN_Q_OVERFLOW -> rescan. Rescans must openat(dirfd,".") — NOT
   dup() (shares dir offset -> empty rescan; real bug, caught by storm test).
-  Deleted dir: we hold its fd so IN_DELETE_SELF never fires; detect self IN_ATTRIB +
-  fstat nlink==0. Test hooks: set_pending_max_for_test, rescans, live_workers.
+  Deleted/moved dir: while ANY fd holds it (ours always does) IN_DELETE_SELF is deferred,
+  and plain rmdir sends NO self IN_ATTRIB (an earlier fix wrongly relied on that; a test
+  helper's chmod masked it). So we also watch the PARENT for IN_DELETE|IN_MOVED_FROM of our
+  basename, then confirm with still_here() (fstat nlink==0, or path no longer same inode).
+  Test hooks: set_pending_max_for_test, rescans, live_workers.
+  Free space: fstatvfs on the worker, carried in CHUNK(last)/DELTA messages.
+  TODO: one inotify instance per scanner; max_user_instances is 128 per user (shared with
+  the whole desktop). Many tabs could exhaust it -> live=false silently. Consider one
+  shared instance per process + wd demux, and surface "not live" in the UI.
 - dirmodel: GObject, signals changed/state-changed. Generational slot handles (GbkHandle:
   gen<<32|slot). Rescan = mark (epoch) and sweep at last chunk. Incremental re-sort for
   small batches, full sort otherwise; gbk_dir_model_check_order() is the oracle.
@@ -195,6 +208,23 @@ Benchmarks (./build bench, release, warm cache, host fs, 2026-10-10):
   Optimization candidate: parallel statx across a small thread pool (helps cold cache /
   network fs most). Loading re-sorts are throttled to every 100ms (order_stale).
 
-Not built yet: GUI (compact view widget, path bar, tabs, status bar, menus), launching
+GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false):
+- view: GbkView (css name "iconview", class "view"), GtkScrollable (hadjustment only).
+  Columns flow top->bottom, left->right; per-column width = widest item, capped at
+  max(240, 2/3 width), ellipsize middle. Text width: ASCII advance table + 3px slack,
+  Pango only for non-ASCII; cached per slot+gen. Icons per type id via
+  gtk_icon_theme_choose_icon_for_scale (specific, generic, text-x-generic).
+  Selection = GHashTable of handles; pruned on model change. Signals: activate,
+  selection-changed, context-menu(GdkEvent*), search-changed. Type-ahead: prefix match on
+  sort keys, 1s timeout, shown in status bar.
+- window: GbkWindow (GtkApplicationWindow). Actions win.back/forward/up/toggle-hidden/
+  terminal/close; accels set in main.c. Up/back-to-parent focuses the child we came from.
+  GONE / ENOENT / ENOTDIR -> walk up to nearest ancestor (async, one level per attempt).
+- dirmodel announces state-changed only AFTER the order is updated (finish_batch).
+- context: refcounted {types (system + config [Types]), config, config_errors}.
+- launch: g_spawn_async argv, SEARCH_PATH, stdin /dev/null; GLib reaps children.
+- main: GtkApplication NON_UNIQUE (process per invocation), argv parsed by us.
+
+Not built yet: GUI pieces (path bar, tabs, menus), launching
 (spawn, default handler via GAppInfo, script/terminal logic), clipboard, file operations
 (copy/move/trash/delete/rename with conflict dialog), type-ahead, keybindings.

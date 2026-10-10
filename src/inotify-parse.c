@@ -15,7 +15,7 @@ gbk_inotify_parse (const uint8_t *buf, size_t len, GbkInotifyFn fn, void *data)
         return false;
 
       if (ev.len == 0)
-        fn (ev.mask, nullptr, 0, data);
+        fn (ev.wd, ev.mask, nullptr, 0, data);
       else
         {
           /* The kernel NUL-pads the name to ev.len; don't trust that a NUL is present. */
@@ -24,9 +24,9 @@ gbk_inotify_parse (const uint8_t *buf, size_t len, GbkInotifyFn fn, void *data)
           if (name_len == ev.len)
             return false;
           if (name_len == 0)
-            fn (ev.mask, nullptr, 0, data);
+            fn (ev.wd, ev.mask, nullptr, 0, data);
           else
-            fn (ev.mask, raw, name_len, data);
+            fn (ev.wd, ev.mask, raw, name_len, data);
         }
       off = end;
     }

@@ -38,6 +38,8 @@ const char *gbk_dir_model_path (GbkDirModel *m);
 GbkDirState gbk_dir_model_state (GbkDirModel *m);
 int gbk_dir_model_error (GbkDirModel *m);          /* errno value in GBK_DIR_ERROR */
 bool gbk_dir_model_live (GbkDirModel *m);          /* live updates active */
+/* Free space on the directory's filesystem, if known yet. */
+bool gbk_dir_model_free_space (GbkDirModel *m, uint64_t *bytes);
 
 void gbk_dir_model_set_sort (GbkDirModel *m, GbkSortMode mode);
 GbkSortMode gbk_dir_model_sort (GbkDirModel *m);

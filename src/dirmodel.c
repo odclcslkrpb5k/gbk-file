@@ -33,6 +33,8 @@ struct _GbkDirModel
   GbkDirState state;
   int error;
   bool live;
+  bool has_free;
+  uint64_t free_bytes;
 
   GbkSortMode sort;
   bool show_hidden;
@@ -321,6 +323,14 @@ stop_scanner (GbkDirModel *m)
 static bool
 apply (GbkDirModel *m, GbkScanMsg *msg)
 {
+  bool free_changed = false;
+  if (msg->has_free && (!m->has_free || m->free_bytes != msg->free_bytes))
+    {
+      m->has_free = true;
+      m->free_bytes = msg->free_bytes;
+      free_changed = true;
+    }
+
   switch (msg->type)
     {
     case GBK_SCAN_CHUNK:
@@ -348,11 +358,11 @@ apply (GbkDirModel *m, GbkScanMsg *msg)
     case GBK_SCAN_ERROR:
       m->error = msg->error;
       m->live = false;
-      return false;
+      return free_changed;
 
     case GBK_SCAN_GONE:
       m->live = false;
-      return false;
+      return free_changed;
 
     default:
       gbk_fatal ("bad scan message type %d", (int) msg->type);
@@ -386,7 +396,7 @@ begin_batch (GbkDirModel *m)
 }
 
 static void
-end_batch (GbkDirModel *m, bool changed)
+end_batch (GbkDirModel *m, bool changed, bool loading)
 {
   if (!changed)
     return;
@@ -395,7 +405,7 @@ end_batch (GbkDirModel *m, bool changed)
    * bounded rate. Deferring is safe only while loading: chunks only add or replace entries,
    * so the stale order still references live slots. The last chunk ends LOADING, so the
    * final order is always computed. */
-  if (m->state == GBK_DIR_LOADING && m->painted && now - m->last_order_us < LOADING_REFRESH_US)
+  if (loading && m->painted && now - m->last_order_us < LOADING_REFRESH_US)
     {
       m->order_stale = true;
       return;
@@ -412,15 +422,25 @@ end_batch (GbkDirModel *m, bool changed)
   g_signal_emit (m, signals[SIGNAL_CHANGED], 0);
 }
 
+/* Applies a message. The resulting state is returned via `next`, not set: callers announce
+ * it only after end_batch, so a "state-changed" listener always sees an up-to-date order
+ * (e.g. READY means every entry is already visible). */
 static void
-handle_message (GbkDirModel *m, GbkScanMsg *msg, bool *changed)
+handle_message (GbkDirModel *m, GbkScanMsg *msg, bool *changed, GbkDirState *next)
 {
   *changed |= apply (m, msg);
-  GbkDirState next = state_after (msg, m->state);
+  *next = state_after (msg, *next);
   bool final = msg->type == GBK_SCAN_ERROR || msg->type == GBK_SCAN_GONE;
   gbk_scan_msg_free (msg);
   if (final)
     stop_scanner (m);
+}
+
+/* Order first, then announce the state: a READY listener must see every entry. */
+static void
+finish_batch (GbkDirModel *m, bool changed, GbkDirState next)
+{
+  end_batch (m, changed, next == GBK_DIR_LOADING);
   set_state (m, next);
 }
 
@@ -432,17 +452,19 @@ on_scanner_wake (int fd G_GNUC_UNUSED, GIOCondition condition G_GNUC_UNUSED, voi
 
   begin_batch (m);
   bool changed = false;
+  GbkDirState next = m->state;
   for (int n = 0; n < DRAIN_BUDGET && m->scanner != nullptr; n++)
     {
       GbkScanMsg *msg = gbk_scanner_pop (m->scanner);
       if (msg == nullptr)
         break;
-      handle_message (m, msg, &changed);
+      handle_message (m, msg, &changed, &next);
       if (n == DRAIN_BUDGET - 1 && m->scanner != nullptr)
         gbk_scanner_rearm (m->scanner);     /* more may be waiting: come back next iteration */
     }
-  end_batch (m, changed);
-  return m->scanner != nullptr;
+  bool alive = m->scanner != nullptr;
+  finish_batch (m, changed, next);
+  return alive;
 }
 
 /* ---- GObject ---- */
@@ -525,8 +547,9 @@ gbk_dir_model_apply_for_test (GbkDirModel *m, GbkScanMsg *msg)
   g_assert (m->scanner == nullptr);
   begin_batch (m);
   bool changed = false;
-  handle_message (m, msg, &changed);
-  end_batch (m, changed);
+  GbkDirState next = m->state;
+  handle_message (m, msg, &changed, &next);
+  finish_batch (m, changed, next);
 }
 
 void
@@ -582,6 +605,13 @@ bool
 gbk_dir_model_live (GbkDirModel *m)
 {
   return m->live;
+}
+
+bool
+gbk_dir_model_free_space (GbkDirModel *m, uint64_t *bytes)
+{
+  *bytes = m->free_bytes;
+  return m->has_free;
 }
 
 void

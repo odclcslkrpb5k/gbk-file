@@ -4,12 +4,16 @@ test_env.set('G_DEBUG', 'fatal-warnings,fatal-criticals,gc-friendly')
 test_env.set('G_ENABLE_DIAGNOSTIC', '1')
 test_env.set('ASAN_OPTIONS', 'detect_leaks=1:abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1')
 test_env.set('UBSAN_OPTIONS', 'halt_on_error=1:print_stacktrace=1')
+test_env.set('LSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'lsan.supp' + ':print_suppressions=0')
 # Hermetic: never read the invoking user's real config/data.
 test_env.set('XDG_CONFIG_HOME', '/nonexistent/config')
 test_env.set('XDG_DATA_HOME', '/nonexistent/data')
 test_env.set('GBK_SOURCE_ROOT', meson.project_source_root())
+test_env.set('GBK_ARTIFACTS', meson.project_source_root() / 'out' / 'artifacts')
 
 test_libs = [core_lib, lifetime_lib]
+gui_test_libs = [gui_lib, core_lib, lifetime_lib]
+gui_tests = ['view', 'window']
 test_inc = [config_inc, core_inc]
 
 unit_tests = ['lifetime', 'filetype', 'natsort', 'dirmodel', 'scanner', 'command', 'config']
@@ -23,6 +27,16 @@ if not get_option('fuzzing')
       dependencies : deps,
     )
     test(name, exe, env : test_env, protocol : 'tap', args : ['--tap'], timeout : 120)
+  endforeach
+  foreach name : gui_tests
+    exe = executable('test-' + name, 'test-' + name + '.c',
+      include_directories : test_inc,
+      link_with : gui_test_libs,
+      dependencies : deps,
+    )
+    # One at a time: they share the Xvfb display.
+    test(name, exe, env : test_env, protocol : 'tap', args : ['--tap'], timeout : 120,
+         is_parallel : false)
   endforeach
 endif
 

@@ -3,9 +3,10 @@
 #include "fuzz.h"
 
 static void
-on_event (uint32_t mask, const char *name, size_t name_len, void *data)
+on_event (int wd, uint32_t mask, const char *name, size_t name_len, void *data)
 {
   size_t *count = data;
+  (void) wd;
   (void) mask;
   if (name != nullptr)
     {

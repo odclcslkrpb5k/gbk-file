@@ -12,7 +12,24 @@ setup() {  # setup <dir> <meson options...>
   fi
 }
 
+# GUI tests need a display: a private Xvfb for the life of this script.
+start_x() {
+  [[ -n ${DISPLAY:-} ]] && return
+  Xvfb :99 -screen 0 1280x800x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
+  local pid=$!
+  trap "kill $pid 2>/dev/null" EXIT
+  for _ in $(seq 100); do
+    [[ -e /tmp/.X11-unix/X99 ]] && break
+    sleep 0.05
+  done
+  export DISPLAY=:99 GDK_BACKEND=x11
+  # No session bus or a11y bus in the container: keep GTK from trying (and warning).
+  export NO_AT_BRIDGE=1 GTK_A11Y=none GSETTINGS_BACKEND=memory
+  mkdir -p out/artifacts
+}
+
 debug() {
+  start_x
   echo "== debug (ASan + UBSan) =="
   setup out/debug -Dbuildtype=debug -Db_sanitize=address,undefined
   meson compile -C out/debug
@@ -59,6 +76,7 @@ release() {
   analyze
   fuzz 20
   echo "== release (hardened) =="
+  start_x
   # b_ndebug=false: assertions stay on in the shipped binary.
   setup out/release -Dbuildtype=debugoptimized -Db_ndebug=false -Dhardening=true
   meson compile -C out/release

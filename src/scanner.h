@@ -28,6 +28,8 @@ typedef struct
   bool last;           /* CHUNK: last of a snapshot */
   bool live;           /* CHUNK: live updates (inotify) are active */
   int error;           /* ERROR */
+  bool has_free;       /* CHUNK(last), DELTA: free_bytes is valid */
+  uint64_t free_bytes; /* space available to unprivileged users on this filesystem */
   GPtrArray *upserts;  /* GbkEntry*, owned; never nullptr */
   GPtrArray *removes;  /* char* raw names, owned; never nullptr */
 } GbkScanMsg;

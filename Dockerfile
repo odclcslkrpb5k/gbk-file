@@ -13,6 +13,7 @@ RUN apt-get update \
       clang llvm libclang-rt-dev \
       libgtk-3-dev \
       xvfb xauth \
+      fonts-dejavu-core adwaita-icon-theme librsvg2-common \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

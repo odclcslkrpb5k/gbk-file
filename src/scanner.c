@@ -107,6 +107,20 @@ push_error (GbkScanner *s, GbkScanMsgType type, int error)
   push (s, m);
 }
 
+/* Free space, read on the worker: statvfs can block on a dead network mount. */
+static void
+set_free_space (GbkScanMsg *m, int dirfd)
+{
+  struct statvfs sv;
+  if (fstatvfs (dirfd, &sv) != 0)
+    return;
+  uint64_t bytes;
+  if (ckd_mul (&bytes, (uint64_t) sv.f_bavail, (uint64_t) sv.f_frsize))
+    bytes = UINT64_MAX;
+  m->free_bytes = bytes;
+  m->has_free = true;
+}
+
 /* ---- Full scan ---- */
 
 /* Sends the directory as a CHUNK sequence. Returns false if cancelled or unreadable (an
@@ -176,6 +190,7 @@ full_scan (GbkScanner *s, int dirfd, bool live)
       return false;
     }
   chunk->last = true;
+  set_free_space (chunk, dirfd);
   push (s, chunk);
   return true;
 }
@@ -185,21 +200,38 @@ full_scan (GbkScanner *s, int dirfd, bool live)
 typedef struct
 {
   GHashTable *names;    /* owned raw names whose state must be re-read */
+  int self_wd;          /* watch on the directory itself */
+  int parent_wd;        /* watch on its parent (-1 if none), for our own deletion/move */
+  const char *basename; /* our name in the parent */
   bool overflow;
   bool gone;
-  bool self_attrib;     /* the directory's own attributes changed (maybe its link count) */
+  bool maybe_gone;      /* something happened to us that may mean deleted or moved */
 } Pending;
 
 static void
-on_inotify_event (uint32_t mask, const char *name, size_t name_len, void *data)
+on_inotify_event (int wd, uint32_t mask, const char *name, size_t name_len, void *data)
 {
   Pending *p = data;
   if (mask & IN_Q_OVERFLOW)
-    p->overflow = true;
+    {
+      p->overflow = true;
+      p->maybe_gone = true;      /* lost events may include our own deletion */
+      return;
+    }
+  if (wd == p->parent_wd)
+    {
+      /* Only our own name matters here; everything else in the parent is noise. */
+      if (name != nullptr && (mask & (IN_DELETE | IN_MOVED_FROM))
+          && strlen (p->basename) == name_len && memcmp (p->basename, name, name_len) == 0)
+        p->maybe_gone = true;
+      return;
+    }
+  if (wd != p->self_wd)
+    return;                      /* a removed watch's stragglers */
   if (mask & SELF_GONE_MASK)
     p->gone = true;
   if (name == nullptr && (mask & IN_ATTRIB))
-    p->self_attrib = true;
+    p->maybe_gone = true;
   if (name != nullptr && !p->overflow)
     {
       if (g_hash_table_size (p->names) >= (guint) g_atomic_int_get (&pending_max))
@@ -249,6 +281,7 @@ send_delta (GbkScanner *s, int dirfd, Pending *p)
         g_ptr_array_add (m->removes, g_strdup (name));
     }
   g_hash_table_remove_all (p->names);
+  set_free_space (m, dirfd);
   if (m->upserts->len > 0 || m->removes->len > 0)
     push (s, m);
   else
@@ -276,10 +309,29 @@ wait_events (GbkScanner *s, int ifd, int timeout_ms)
   return !is_cancelled (s);
 }
 
-static void
-watch_loop (GbkScanner *s, int ifd, int dirfd)
+/* Is the directory we hold still at its path? False if deleted (link count 0) or if the
+ * path now names something else (moved away, replaced). */
+static bool
+still_here (const char *path, int dirfd)
 {
-  Pending p = { .names = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, nullptr) };
+  struct stat held, at_path;
+  if (fstat (dirfd, &held) != 0 || held.st_nlink == 0)
+    return false;
+  if (stat (path, &at_path) != 0)
+    return errno != ENOENT && errno != ENOTDIR;   /* other errors: assume still there */
+  return held.st_dev == at_path.st_dev && held.st_ino == at_path.st_ino;
+}
+
+static void
+watch_loop (GbkScanner *s, int ifd, int self_wd, int parent_wd, int dirfd)
+{
+  g_autofree char *base = g_path_get_basename (s->path);
+  Pending p = {
+    .names = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, nullptr),
+    .self_wd = self_wd,
+    .parent_wd = parent_wd,
+    .basename = base,
+  };
 
   while (!is_cancelled (s))
     {
@@ -308,14 +360,13 @@ watch_loop (GbkScanner *s, int ifd, int dirfd)
       if (is_cancelled (s))
         break;
 
-      /* We hold the directory open, so deleting it can't free the inode and the kernel
-       * never sends IN_DELETE_SELF. rmdir does send IN_ATTRIB (link count change) on the
-       * directory itself: a link count of 0 means it's gone. */
-      if (p.self_attrib)
+      /* While anyone holds the directory open (we do), deleting it doesn't free the inode,
+       * so IN_DELETE_SELF is deferred and nothing arrives on our own watch. The parent's
+       * watch does see our name deleted or moved away: confirm, then report GONE. */
+      if (p.maybe_gone)
         {
-          p.self_attrib = false;
-          struct stat st;
-          if (fstat (dirfd, &st) == 0 && st.st_nlink == 0)
+          p.maybe_gone = false;
+          if (!still_here (s->path, dirfd))
             p.gone = true;
         }
 
@@ -354,10 +405,19 @@ worker (void *data)
 
   /* Watch before scanning, so nothing created during the scan is missed. */
   int ifd = inotify_init1 (IN_NONBLOCK | IN_CLOEXEC);
-  bool live = false;
-  if (ifd >= 0)
-    live = inotify_add_watch (ifd, s->path, WATCH_MASK) >= 0;
-  /* No watch (e.g. fs.inotify.max_user_watches exhausted): still list, just not live. */
+  int self_wd = ifd >= 0 ? inotify_add_watch (ifd, s->path, WATCH_MASK) : -1;
+  bool live = self_wd >= 0;
+  /* No watch (e.g. inotify limits exhausted): still list, just not live. */
+  int parent_wd = -1;
+  if (live && !g_str_equal (s->path, "/"))
+    {
+      /* Our own deletion/move is only reliably visible from the parent (see watch_loop).
+       * Best effort: an unwatchable parent just means we notice later. */
+      g_autofree char *parent = g_path_get_dirname (s->path);
+      parent_wd = inotify_add_watch (ifd, parent, IN_DELETE | IN_MOVED_FROM | IN_ONLYDIR);
+      if (parent_wd == self_wd)
+        parent_wd = -1;          /* same inode (bind mounts): don't confuse the two */
+    }
 
   int dirfd = open (s->path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (dirfd < 0)
@@ -365,7 +425,7 @@ worker (void *data)
   else
     {
       if (full_scan (s, dirfd, live) && live)
-        watch_loop (s, ifd, dirfd);
+        watch_loop (s, ifd, self_wd, parent_wd, dirfd);
       close (dirfd);
     }
 

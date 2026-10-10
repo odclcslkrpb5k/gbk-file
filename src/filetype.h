@@ -68,6 +68,8 @@ void gbk_type_builder_load_generic_icons (GbkTypeBuilder *b, const char *data, s
 
 /* Table from the user's and system's shared-mime-info databases (XDG data dirs). */
 [[nodiscard]] GbkTypeTable *gbk_type_table_new_system (void);
+/* The same, as a builder, so more mappings can be added before finishing. */
+[[nodiscard]] GbkTypeBuilder *gbk_type_builder_new_system (void);
 
 GbkTypeTable *gbk_type_table_ref (GbkTypeTable *t);
 void gbk_type_table_unref (GbkTypeTable *t);

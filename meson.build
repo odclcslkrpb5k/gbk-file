@@ -38,8 +38,6 @@ add_project_arguments(
   '-fno-delete-null-pointer-checks',
   '-fstrict-flex-arrays=3',
 
-  # Threads with glibc pthreads (OpenSSF).
-  '-fexceptions',
 
   '-D_GNU_SOURCE',                 # statx, O_* flags
   '-DG_LOG_DOMAIN="gbk"',
@@ -90,6 +88,12 @@ endif
 
 if get_option('analyzer')
   add_project_arguments('-fanalyzer', language : 'c')
+else
+  # OpenSSF: -fexceptions so pthread cancellation unwinds through C frames. We ban
+  # cancellation outright (prelude.h), so nothing can unwind; the analyzer build leaves it
+  # out because with it, -fanalyzer reports every resource as leaked on unwind paths that
+  # cannot happen here.
+  add_project_arguments('-fexceptions', language : 'c')
 endif
 
 conf = configuration_data()
@@ -117,6 +121,9 @@ banned = {
   'atoi'             : '(void) atoi("1");',
   'system'           : '(void) system("true");',
   'g_error'          : 'g_error("x");',
+  'pthread_cancel'   : '(void) pthread_cancel(pthread_self());',
+  'pthread_exit'     : 'pthread_exit(nullptr);',
+  'g_thread_exit'    : 'g_thread_exit(nullptr);',
   'alloca'           : '(void) alloca(4);',
   'g_newa'           : '(void) g_newa(char, 4);',
   'g_spawn_command_line_async' : '(void) g_spawn_command_line_async("true", nullptr);',

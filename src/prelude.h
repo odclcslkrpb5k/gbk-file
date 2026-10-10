@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <malloc.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdckdint.h>
 #include <stddef.h>
@@ -19,10 +20,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/eventfd.h>
 #include <sys/inotify.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -43,6 +46,10 @@
  * Commands are always parsed to argv and spawned directly (no injection via filenames). */
 #pragma GCC poison system popen
 #pragma GCC poison g_spawn_command_line_async g_spawn_command_line_sync
+
+/* --- Thread cancellation / exit: unwinding would skip every cleanup in C code. Threads
+ * finish by returning from their function. (Also why -fexceptions buys us nothing.) --- */
+#pragma GCC poison pthread_cancel pthread_exit g_thread_exit
 
 /* --- g_error: use gbk_fatal (fatal.h). --- */
 #undef g_error

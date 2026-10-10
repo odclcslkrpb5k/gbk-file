@@ -68,11 +68,22 @@ static void
 breakdown (const char *dir, GbkTypeTable *types)
 {
   int dfd = open (dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (dfd < 0)
+    {
+      g_printerr ("open %s: %s\n", dir, g_strerror (errno));
+      return;
+    }
   g_autoptr (GPtrArray) names = g_ptr_array_new_with_free_func (g_free);
   g_autoptr (GArray) dtypes = g_array_new (false, false, 1);
 
   int64_t t0 = now_us ();
-  DIR *d = fdopendir (openat (dfd, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+  DIR *d = opendir (dir);
+  if (d == nullptr)
+    {
+      g_printerr ("opendir %s: %s\n", dir, g_strerror (errno));
+      close (dfd);
+      return;
+    }
   struct dirent *de;
   while ((de = readdir (d)) != nullptr)
     {

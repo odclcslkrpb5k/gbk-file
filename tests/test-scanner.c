@@ -64,7 +64,8 @@ rm_rf (const char *path)
     return;
   if (S_ISDIR (st.st_mode))
     {
-      chmod (path, 0700);
+      /* No chmod here: it generates inotify events that once masked a real bug (deletion
+       * detection that only worked if something else touched the directory). */
       g_autoptr (GDir) d = g_dir_open (path, 0, nullptr);
       const char *name;
       while (d != nullptr && (name = g_dir_read_name (d)) != nullptr)
@@ -146,6 +147,9 @@ test_initial_listing (void)
   g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
   g_assert_true (wait_until (is_ready, m, 5000));
   g_assert_true (gbk_dir_model_live (m));
+  uint64_t free_bytes = 0;
+  g_assert_true (gbk_dir_model_free_space (m, &free_bytes));
+  g_assert_cmpuint (free_bytes, >, 0);
   g_assert_cmpuint (gbk_dir_model_n_entries (m), ==, 8);
   g_assert_cmpuint (gbk_dir_model_n_visible (m), ==, 7);    /* .hidden filtered */
 
@@ -331,6 +335,74 @@ test_gone (void)
 }
 
 static void
+test_gone_nested (void)
+{
+  /* Watching a/b while all of a/ is removed (children first, as rm -r does). */
+  g_autofree char *parent = mktmp ();
+  g_autofree char *a = g_build_filename (parent, "a", nullptr);
+  g_autofree char *ab = g_build_filename (parent, "a", "b", nullptr);
+  g_assert_cmpint (g_mkdir_with_parents (ab, 0755), ==, 0);
+  put (ab, "f");
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (ab, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  rm_rf (a);
+  g_assert_true (wait_until (is_gone, m, 5000));
+  g_clear_object (&m);
+  rm_rf (parent);
+}
+
+/* A plain rmdir and nothing else. The scanner's own fd keeps the inode alive (as would a
+ * shell sitting in the directory), so IN_DELETE_SELF can't be what detects this. */
+static void
+test_gone_plain_rmdir (void)
+{
+  g_autofree char *parent = mktmp ();
+  g_autofree char *dir = g_build_filename (parent, "held", nullptr);
+  g_assert_cmpint (mkdir (dir, 0755), ==, 0);
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  g_assert_cmpint (rmdir (dir), ==, 0);
+  g_assert_true (wait_until (is_gone, m, 5000));
+  g_clear_object (&m);
+  rm_rf (parent);
+}
+
+static void
+test_moved_away (void)
+{
+  g_autofree char *parent = mktmp ();
+  g_autofree char *dir = g_build_filename (parent, "here", nullptr);
+  g_autofree char *elsewhere = g_build_filename (parent, "there", nullptr);
+  g_assert_cmpint (mkdir (dir, 0755), ==, 0);
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  g_assert_cmpint (rename (dir, elsewhere), ==, 0);
+  g_assert_true (wait_until (is_gone, m, 5000));
+  g_clear_object (&m);
+  rm_rf (parent);
+}
+
+static void
+test_sibling_deleted_is_not_us (void)
+{
+  /* Unrelated changes in the parent must not be mistaken for our deletion. */
+  g_autofree char *parent = mktmp ();
+  g_autofree char *dir = g_build_filename (parent, "me", nullptr);
+  g_autofree char *sib = g_build_filename (parent, "me2", nullptr);
+  g_assert_cmpint (mkdir (dir, 0755), ==, 0);
+  g_assert_cmpint (mkdir (sib, 0755), ==, 0);
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  g_assert_cmpint (rmdir (sib), ==, 0);
+  put (dir, "still-alive");                 /* then a real change inside us */
+  MatchCtx c = { m, dir };
+  g_assert_true (wait_until (model_matches_fs, &c, 5000));
+  g_assert_cmpint (gbk_dir_model_state (m), ==, GBK_DIR_READY);
+  g_clear_object (&m);
+  rm_rf (parent);
+}
+
+static void
 test_errors (void)
 {
   g_autoptr (GbkDirModel) missing = gbk_dir_model_new ("/nonexistent/gbk/dir", types);
@@ -353,6 +425,7 @@ test_errors (void)
       g_assert_true (wait_until (not_loading, denied, 5000));
       g_assert_cmpint (gbk_dir_model_state (denied), ==, GBK_DIR_ERROR);
       g_assert_cmpint (gbk_dir_model_error (denied), ==, EACCES);
+      chmod (locked, 0700);
     }
   rm_rf (file_dir);
 }
@@ -393,6 +466,10 @@ main (int argc, char **argv)
   g_test_add_func ("/scanner/storm-deltas", test_storm_deltas);
   g_test_add_func ("/scanner/storm-rescans", test_storm_rescans);
   g_test_add_func ("/scanner/gone", test_gone);
+  g_test_add_func ("/scanner/gone-nested", test_gone_nested);
+  g_test_add_func ("/scanner/gone-plain-rmdir", test_gone_plain_rmdir);
+  g_test_add_func ("/scanner/moved-away", test_moved_away);
+  g_test_add_func ("/scanner/sibling-deleted-is-not-us", test_sibling_deleted_is_not_us);
   g_test_add_func ("/scanner/errors", test_errors);
   g_test_add_func ("/scanner/cancel-mid-scan", test_cancel_mid_scan);
   int status = g_test_run ();

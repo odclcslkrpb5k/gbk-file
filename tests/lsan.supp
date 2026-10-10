@@ -1,0 +1,6 @@
+# LeakSanitizer suppressions. Keep this list tiny and justify every line: a suppression
+# matches if the named module/function appears anywhere in the allocation stack.
+#
+# fontconfig keeps its font cache for the life of the process (FcFini is never called).
+# Our own objects are never allocated inside fontconfig, so this can't hide our leaks.
+leak:libfontconfig.so
