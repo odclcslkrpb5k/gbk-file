@@ -16,14 +16,16 @@ User has run Thunar ~10 years with an unchanged config and uses few of its featu
 Primary goal: maximum performance in every scenario + minimal memory footprint.
 
 ## Decided
+- C + GTK3 (decided 2026-10-10).
+- Quality bar: "no crashes, ever". Use the Hierarchy of Defect Controls ladder
+  (hierarchy-of-defect-controls plugin); every safety measure must be Engineer rung or
+  better (Eliminate > Substitute > Engineer). Name the rung when proposing a control.
 - Event-driven fs change updates (files created by other apps appear without refresh).
 - No thumbnails, ever.
 - File type by filename extension only. No content sniffing.
   No extension -> default "unknown" type.
 
 ## Open questions
-- Language/toolkit. Recommended C + GTK3 (Xfce GTK3 theme fidelity, cairo not GL,
-  native API, gtk3-rs archived 2024). Waiting on: must it match Xfce/GTK3 theme exactly?
 - Extension edge cases (my proposals, not yet confirmed):
   1. dotfiles (.bashrc) = no extension -> unknown
   2. longest glob match (.tar.gz beats .gz), per shared-mime-info globs2
@@ -45,3 +47,40 @@ Primary goal: maximum performance in every scenario + minimal memory footprint.
 - Tabs.
 - Status bar: "1 folder | Free space: 40.9 GiB".
 - Retro-ish theme (salmon/tan, bold monospace-ish labels) — theme fidelity likely matters.
+
+## Local toolchain (2026-10-10)
+gcc 15.2 (default -std=gnu23, has -fanalyzer, -fhardened, -fzero-init-padding-bits),
+glibc 2.43, GTK 3.24.52, GLib 2.88, meson + ninja.
+NOT installed: clang, clang-tidy, valgrind, cppcheck, AFL++. (User must install; I can't write outside repo.)
+
+## GTK3 status
+3.24.52 (Mar 2026); upstream moved to one release/year, crash/important fixes only.
+Stable target, no new features coming. Fine for us.
+
+## Safety plan (proposed 2026-10-10, awaiting user OK)
+Eliminate:
+- No thumbnails/sniffing -> no decoder code in process. No plugins, no dlopen (-z nodlopen).
+- File entries live in per-directory-load storage, referenced by (generation,index) handles,
+  never raw pointers held across main-loop iterations -> stale-entry UAF can't exist.
+- GTK touched only from main thread; workers send self-contained messages (owned copies).
+- Filenames are opaque bytes; display strings made once via g_filename_display_name.
+Substitute:
+- gnu23: nullptr, constexpr, [[nodiscard]], {} init, <stdckdint.h> ckd_* for size math.
+- GLib containers/strings; g_autofree/g_autoptr/g_steal_pointer/g_clear_*; G_DECLARE_FINAL_TYPE.
+- GSlice is just malloc since GLib 2.76: use g_new/g_free, not g_slice.
+Engineer:
+- -Werror always (solo, never distributed). Big warning set incl. -Wconversion,
+  -Wjump-misses-init (catches goto past g_auto vars), -Wshadow, -Wvla, -Wnull-dereference,
+  -Wswitch-enum, -Wmissing-prototypes, -Wstrict-prototypes, -Wcast-qual, -Wformat=2.
+- poison.h: #pragma GCC poison strcpy strcat sprintf vsprintf strncpy gets strtok atoi...
+- Build variants: debug(ASan+UBSan, no FORTIFY), analyze(-fanalyzer, must be clean),
+  release(OpenSSF 2026-08-20 TL;DR set + -fhardened-ish, FORTIFY=3, auto-var-init=zero).
+- Tests run with G_DEBUG=fatal-warnings,fatal-criticals: any g_return_if_fail = failure.
+- Stress tests: scanner vs. concurrent create/delete/rename storms; inotify overflow (IN_Q_OVERFLOW).
+- Signal/source lifetime: g_signal_connect_object or disconnect in dispose; every
+  g_idle/g_timeout id stored and g_clear_handle_id'd in dispose. Want a test/check for this.
+- Git hooks via core.hooksPath (tracked .githooks/): pre-commit = build+tests,
+  pre-push = analyzer + sanitizer test run. This replaces CI.
+Protect (deliberate, flagged):
+- -ftrivial-auto-var-init=zero, FORTIFY, stack protector: absorb residual bugs in release.
+- Unavoidable exits: OOM (g_malloc aborts), X server connection loss. Not our code.
