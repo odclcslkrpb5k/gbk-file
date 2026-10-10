@@ -23,19 +23,25 @@ Primary goal: maximum performance in every scenario + minimal memory footprint.
 - Event-driven fs change updates (files created by other apps appear without refresh).
 - No thumbnails, ever.
 - File type by filename extension only. No content sniffing.
-  No extension -> default "unknown" type.
+  No extension -> default "unknown" type. All of these configurable later:
+  - dotfiles (.bashrc) = no extension -> unknown
+  - longest glob match (.tar.gz beats .gz), from shared-mime-info globs2
+  - case-insensitive
+  - no-extension + exec bit -> "executable" type (mode bits free from statx)
+- Double-click executable: runs it. Script (by extension) -> runs in configured terminal so
+  stdout/stderr visible. Extensionless executables / AppImage -> run directly, no terminal.
+  Right-click menu: "Execute" and "Execute in Terminal" to override per-invocation.
+- Clipboard/edit keys: Ctrl+C/X/V, Delete -> trash (freedesktop spec), Shift+Delete -> permanent. F2 rename.
+- VIEW: Thunar "Compact view" at lowest zoom ONLY. No other view modes, ever.
+  (names flow top->bottom in columns, columns left->right, horizontal scroll)
+- Sort default: name, case-insensitive, folders first. Also sort by last-modified,
+  switchable from the empty-space right-click menu.
+- Selection: click, Shift+click, Ctrl+click, arrows, Shift+arrows, Ctrl+arrows (move focus
+  without selecting), Space (toggle focused). NO rubber-band/drag-select.
+- Type-ahead: typing jumps to first match. Used frequently.
 
 ## Open questions
-- Extension edge cases (my proposals, not yet confirmed):
-  1. dotfiles (.bashrc) = no extension -> unknown
-  2. longest glob match (.tar.gz beats .gz), per shared-mime-info globs2
-  3. case-insensitive
-  4. no-extension + exec bit -> "executable" type (mode bits are free from statx)
 - Config format: user partial to YAML; I recommended GKeyFile (.desktop-style) — awaiting answer.
-- Double-click on executable: run directly, or ask? Scripts vs binaries?
-- Delete key: trash (freedesktop trash spec) vs permanent; Shift+Del?
-- View mode (details list / icons / compact), columns, default sort.
-- Selection extras: shift/ctrl-click, rubber-band, type-ahead find? F2 rename?
 
 ## Feature inventory (user, 2026-10-10; "not exhaustive, muscle memory")
 - F4: open terminal in cwd. Terminal command configurable (user uses xfce4-terminal).
