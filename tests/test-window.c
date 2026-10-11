@@ -187,6 +187,129 @@ test_terminal_missing (void)
   rm_rf (root);
 }
 
+/* ---- context menu ---- */
+
+static GtkMenu *
+open_context_menu (GbkWindow *w)
+{
+  /* A real Menu key press, dispatched the way the main loop does it. */
+  GbkView *v = gbk_window_view (w);
+  gtk_widget_grab_focus (GTK_WIDGET (v));
+  GdkEvent *ev = gdk_event_new (GDK_KEY_PRESS);
+  ev->key.window = g_object_ref (gtk_widget_get_window (GTK_WIDGET (w)));
+  ev->key.keyval = GDK_KEY_Menu;
+  ev->key.time = GDK_CURRENT_TIME;
+  gdk_event_set_device (ev, gdk_seat_get_keyboard (
+      gdk_display_get_default_seat (gtk_widget_get_display (GTK_WIDGET (w)))));
+  gtk_main_do_event (ev);
+  gdk_event_free (ev);
+  GList *menus = gtk_menu_get_for_attach_widget (GTK_WIDGET (v));
+  if (g_list_length (menus) != 1)
+    gbk_fatal ("expected one context menu, got %u", g_list_length (menus));
+  return GTK_MENU (menus->data);
+}
+
+static char *
+menu_labels (GtkMenu *menu)
+{
+  GString *s = g_string_new ("");
+  g_autoptr (GList) children = gtk_container_get_children (GTK_CONTAINER (menu));
+  for (GList *l = children; l != nullptr; l = l->next)
+    {
+      if (s->len > 0)
+        g_string_append_c (s, '|');
+      const char *label = GTK_IS_SEPARATOR_MENU_ITEM (l->data)
+                            ? "-" : gtk_menu_item_get_label (GTK_MENU_ITEM (l->data));
+      g_string_append (s, label);
+    }
+  return g_string_free (s, false);
+}
+
+static void
+choose (GtkMenu *menu, const char *label)
+{
+  g_autoptr (GList) children = gtk_container_get_children (GTK_CONTAINER (menu));
+  for (GList *l = children; l != nullptr; l = l->next)
+    if (!GTK_IS_SEPARATOR_MENU_ITEM (l->data)
+        && g_strcmp0 (gtk_menu_item_get_label (GTK_MENU_ITEM (l->data)), label) == 0)
+      {
+        gtk_menu_item_activate (GTK_MENU_ITEM (l->data));
+        gtk_menu_shell_deactivate (GTK_MENU_SHELL (menu));
+        while (gtk_events_pending ())
+          gtk_main_iteration ();
+        return;
+      }
+  gbk_fatal ("no menu item \"%s\"", label);
+}
+
+static bool
+menus_gone (void *data)
+{
+  return gtk_menu_get_for_attach_widget (GTK_WIDGET (gbk_window_view (data))) == nullptr;
+}
+
+static bool
+file_exists (void *data)
+{
+  return g_file_test (data, G_FILE_TEST_EXISTS);
+}
+
+static void
+test_context_menu (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  g_autofree char *marker = g_build_filename (root, "ran", nullptr);
+  g_autofree char *script = g_strdup_printf ("#!/bin/sh\ntouch '%s'\n", marker);
+  g_autofree char *prog = g_build_filename (root, "prog", nullptr);
+  g_assert_true (g_file_set_contents (prog, script, -1, nullptr));
+  chmod (prog, 0755);
+  /* "old" is older than "new": sorting by modified must flip them. */
+  mkdirs (root, (const char *const[]) { "a-old", "b-new", nullptr });
+  g_autofree char *old = g_build_filename (root, "a-old", nullptr);
+  struct timespec ts[2] = { { .tv_sec = 1000 }, { .tv_sec = 1000 } };
+  utimensat (AT_FDCWD, old, ts, 0);
+
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+  GbkDirModel *m = model_of (w);
+
+  /* Background menu: the directory itself, plus view options. */
+  GtkMenu *menu = open_context_menu (w);
+  g_autofree char *labels = menu_labels (menu);
+  g_assert_cmpstr (labels, ==,
+                   "Open Terminal Here|-|Sort by Name|Sort by Date Modified|-|Show Hidden Files");
+  const char *first = gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0)));
+  g_assert_cmpstr (first, ==, "a-old");
+  choose (menu, "Sort by Date Modified");
+  g_assert_cmpint (gbk_dir_model_sort (m), ==, GBK_SORT_MTIME);
+  g_assert_cmpstr (gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 2))),
+                   ==, "a-old");                     /* oldest last */
+  g_assert_true (wait_until (menus_gone, w));       /* destroyed after closing */
+
+  /* Item menu on an extensionless executable: Execute runs it. */
+  gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (m, "prog"));
+  menu = open_context_menu (w);
+  g_autofree char *labels2 = menu_labels (menu);
+  g_assert_nonnull (strstr (labels2, "Open|"));
+  g_assert_nonnull (strstr (labels2, "Execute|Execute in Terminal"));
+  choose (menu, "Execute");
+  g_assert_true (wait_until (file_exists, marker));
+  g_assert_true (wait_until (menus_gone, w));
+
+  /* Double-click (activate) on it runs it too. */
+  unlink (marker);
+  g_signal_emit_by_name (gbk_window_view (w), "activate");
+  g_assert_true (wait_until (file_exists, marker));
+
+  /* Close the window with a menu still open: no callbacks into a dead window. */
+  menu = open_context_menu (w);
+  gtk_widget_destroy (GTK_WIDGET (w));
+  while (gtk_events_pending ())
+    gtk_main_iteration ();
+  rm_rf (root);
+}
+
 static bool
 no_workers (void *data G_GNUC_UNUSED)
 {
@@ -206,6 +329,7 @@ main (int argc, char **argv)
   g_test_add_func ("/window/navigation", test_navigation);
   g_test_add_func ("/window/vanishing-directory", test_vanishing_directory);
   g_test_add_func ("/window/terminal-missing", test_terminal_missing);
+  g_test_add_func ("/window/context-menu", test_context_menu);
   int status = g_test_run ();
 
   while (gtk_events_pending ())

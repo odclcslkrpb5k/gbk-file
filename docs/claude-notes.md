@@ -222,9 +222,25 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   GONE / ENOENT / ENOTDIR -> walk up to nearest ancestor (async, one level per attempt).
 - dirmodel announces state-changed only AFTER the order is updated (finish_batch).
 - context: refcounted {types (system + config [Types]), config, config_errors}.
-- launch: g_spawn_async argv, SEARCH_PATH, stdin /dev/null; GLib reaps children.
+- launch (core): g_spawn_async argv, SEARCH_PATH, stdin /dev/null; GLib reaps children.
+- open (core): GbkItem = owned snapshot of an entry (abs path, mime, dir/exec/script).
+  gbk_open_plan: dir->ENTER, exec+script->RUN_TERMINAL, exec->RUN, else DEFAULT.
+  Execute/Execute in Terminal for exec files and scripts (non-exec scripts via
+  [Interpreters]). Default app via GIO, grouped per app (one launch for N files).
+  Multi-selection activation skips folders until tabs exist.
+- menu (core, pure): gbk_menu_entries(config, items, background). Item menu: Open, Open
+  With (same-type files; window lists g_app_info_get_recommended_for_type), Execute(+Term)
+  for one runnable file, Open Terminal Here for one folder, then actions matching ALL
+  items. Background: Terminal Here, dir actions, Sort by Name/Date Modified, Show Hidden.
+  Window builds GtkMenu: items' data owned by menu (KEY_ITEMS snapshot), activations
+  connected with window as owner; menu destroyed on idle after deactivate AND when the view
+  is destroyed (GtkMenu is a toplevel: attach-widget destroy does NOT destroy it — leaked
+  once, caught by the lifetime counter). Keyboard popups use gtk_get_current_event() as the
+  trigger (GTK requires one).
+- Tests: test-open uses a private XDG env with a fake default app (.desktop + mimeapps.list)
+  that touches marker files. Variadic nullptr terminators must be cast (C23 nullptr_t).
 - main: GtkApplication NON_UNIQUE (process per invocation), argv parsed by us.
 
-Not built yet: GUI pieces (path bar, tabs, menus), launching
+Not built yet: GUI pieces (path bar, tabs)
 (spawn, default handler via GAppInfo, script/terminal logic), clipboard, file operations
 (copy/move/trash/delete/rename with conflict dialog), type-ahead, keybindings.

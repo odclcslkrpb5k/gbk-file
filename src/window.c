@@ -1,6 +1,7 @@
 #include "window.h"
-#include "launch.h"
 #include "lifetime.h"
+#include "menu.h"
+#include "open.h"
 
 #define HISTORY_MAX 100
 
@@ -259,20 +260,298 @@ go_up (GbkWindow *w)
   open_path (w, parent, child);
 }
 
+/* ---- opening things ---- */
+
+/* The selection as owned GbkItems: safe to keep while the model changes underneath. */
+static GPtrArray *
+snapshot_selection (GbkWindow *w)
+{
+  GPtrArray *items = g_ptr_array_new_with_free_func ((GDestroyNotify) gbk_item_free);
+  size_t n;
+  g_autofree GbkHandle *sel = gbk_view_selected (w->view, &n);
+  for (size_t i = 0; i < n; i++)
+    {
+      const GbkEntry *e = gbk_dir_model_get (w->model, sel[i]);
+      if (e != nullptr)
+        g_ptr_array_add (items, gbk_item_new (w->ctx->config, w->ctx->types, w->path, e));
+    }
+  return items;
+}
+
+static void
+report (GbkWindow *w, const char *what, const GError *error)
+{
+  g_autofree char *msg = g_strdup_printf ("%s: %s", what, error->message);
+  set_message (w, msg);
+}
+
+static GAppLaunchContext *
+launch_context (GbkWindow *w)
+{
+  GdkAppLaunchContext *lc = gdk_display_get_app_launch_context (gtk_widget_get_display (GTK_WIDGET (w)));
+  gdk_app_launch_context_set_timestamp (lc, gtk_get_current_event_time ());
+  return G_APP_LAUNCH_CONTEXT (lc);
+}
+
+/* Double-click / Enter. A single folder is entered; files are run or opened per
+ * gbk_open_plan. (Folders in a multi-selection are skipped until there are tabs.) */
+static void
+open_items (GbkWindow *w, GPtrArray *items)
+{
+  if (items->len == 1 && ((GbkItem *) g_ptr_array_index (items, 0))->is_dir)
+    {
+      gbk_window_open (w, ((GbkItem *) g_ptr_array_index (items, 0))->path);
+      return;
+    }
+  g_autoptr (GPtrArray) by_default = g_ptr_array_new ();
+  for (guint i = 0; i < items->len; i++)
+    {
+      GbkItem *it = g_ptr_array_index (items, i);
+      g_autoptr (GError) error = nullptr;
+      switch (gbk_open_plan (it))
+        {
+        case GBK_OPEN_ENTER:
+          break;
+        case GBK_OPEN_RUN:
+          if (!gbk_open_execute (w->ctx->config, it, false, w->path, &error))
+            report (w, it->display, error);
+          break;
+        case GBK_OPEN_RUN_TERMINAL:
+          if (!gbk_open_execute (w->ctx->config, it, true, w->path, &error))
+            report (w, it->display, error);
+          break;
+        case GBK_OPEN_DEFAULT:
+          g_ptr_array_add (by_default, it);
+          break;
+        default:
+          gbk_fatal ("bad open plan");
+        }
+    }
+  if (by_default->len > 0)
+    {
+      g_autoptr (GAppLaunchContext) lc = launch_context (w);
+      g_autoptr (GError) error = nullptr;
+      if (!gbk_open_default (by_default, lc, &error))
+        report (w, "Open", error);
+    }
+}
+
 /* ---- view events ---- */
 
 static void
-on_activate (GbkView *v, GbkWindow *w)
+on_activate (GbkView *v G_GNUC_UNUSED, GbkWindow *w)
 {
-  size_t n;
-  g_autofree GbkHandle *sel = gbk_view_selected (v, &n);
-  if (n != 1)
-    return;   /* TODO(launch): open files with their default handler */
-  const GbkEntry *e = gbk_dir_model_get (w->model, sel[0]);
-  if (e == nullptr || !gbk_entry_is_dir (e))
-    return;   /* TODO(launch) */
-  g_autofree char *target = g_build_filename (w->path, gbk_entry_name (e), nullptr);
-  gbk_window_open (w, target);
+  g_autoptr (GPtrArray) items = snapshot_selection (w);
+  open_items (w, items);
+}
+
+/* ---- context menu ---- */
+
+/* Each menu item carries its entry kind, plus an action or app; the menu carries the item
+ * snapshot. Activations are connected with the window as owner, so nothing fires after the
+ * window is gone; the data is owned by the menu (items), so nothing outlives it. */
+#define KEY_ITEMS "gbk-items"
+#define KEY_KIND "gbk-kind"
+#define KEY_ACTION "gbk-action"
+#define KEY_APP "gbk-app"
+
+static GPtrArray *
+menu_items_of (GtkWidget *menu_item)
+{
+  GtkWidget *menu = gtk_widget_get_parent (menu_item);
+  /* Open With entries live in a submenu: its items are on the top-level menu. */
+  while (menu != nullptr && g_object_get_data (G_OBJECT (menu), KEY_ITEMS) == nullptr)
+    {
+      GtkWidget *attach = GTK_IS_MENU (menu) ? gtk_menu_get_attach_widget (GTK_MENU (menu)) : nullptr;
+      menu = attach != nullptr ? gtk_widget_get_parent (attach) : nullptr;
+    }
+  if (menu == nullptr)
+    gbk_fatal ("menu item without a snapshot");
+  return g_object_get_data (G_OBJECT (menu), KEY_ITEMS);
+}
+
+static void
+set_sort (GbkWindow *w, GbkSortMode sort)
+{
+  w->sort = sort;
+  if (w->model != nullptr)
+    gbk_dir_model_set_sort (w->model, sort);
+}
+
+static void
+on_menu_item (GtkMenuItem *mi, GbkWindow *w)
+{
+  GPtrArray *items = menu_items_of (GTK_WIDGET (mi));
+  GbkMenuKind kind = (GbkMenuKind) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (mi), KEY_KIND));
+  const GbkItem *first = items->len > 0 ? g_ptr_array_index (items, 0) : nullptr;
+  g_autoptr (GError) error = nullptr;
+  bool ok = true;
+
+  switch (kind)
+    {
+    case GBK_MENU_OPEN:
+      open_items (w, items);
+      break;
+    case GBK_MENU_OPEN_WITH:
+      {
+        GAppInfo *app = g_object_get_data (G_OBJECT (mi), KEY_APP);
+        g_autoptr (GAppLaunchContext) lc = launch_context (w);
+        ok = gbk_open_with (app, items, lc, &error);
+        break;
+      }
+    case GBK_MENU_EXECUTE:
+      ok = gbk_open_execute (w->ctx->config, first, false, w->path, &error);
+      break;
+    case GBK_MENU_EXECUTE_TERMINAL:
+      ok = gbk_open_execute (w->ctx->config, first, true, w->path, &error);
+      break;
+    case GBK_MENU_TERMINAL_HERE:
+      ok = gbk_open_terminal (w->ctx->config, first->path, &error);
+      break;
+    case GBK_MENU_ACTION:
+      ok = gbk_open_action (g_object_get_data (G_OBJECT (mi), KEY_ACTION), items, w->path, &error);
+      break;
+    case GBK_MENU_SORT_NAME:
+      set_sort (w, GBK_SORT_NAME);
+      break;
+    case GBK_MENU_SORT_MTIME:
+      set_sort (w, GBK_SORT_MTIME);
+      break;
+    case GBK_MENU_SHOW_HIDDEN:
+      g_action_group_activate_action (G_ACTION_GROUP (w), "toggle-hidden", nullptr);
+      break;
+    case GBK_MENU_SEPARATOR:
+    default:
+      gbk_fatal ("bad menu entry kind %d", (int) kind);
+    }
+  if (!ok)
+    report (w, gtk_menu_item_get_label (mi), error);
+}
+
+static GtkWidget *
+menu_item (GbkWindow *w, GtkWidget *menu, const char *label, GbkMenuKind kind)
+{
+  GtkWidget *mi = gtk_menu_item_new_with_label (label);
+  g_object_set_data (G_OBJECT (mi), KEY_KIND, GINT_TO_POINTER ((int) kind));
+  gbk_connect (G_OBJECT (w), mi, "activate", G_CALLBACK (on_menu_item), w);
+  gtk_menu_shell_append (GTK_MENU_SHELL (menu), mi);
+  return mi;
+}
+
+static GtkWidget *
+check_item (GbkWindow *w, GtkWidget *menu, const char *label, GbkMenuKind kind, bool active,
+            bool radio)
+{
+  GtkWidget *mi = gtk_check_menu_item_new_with_label (label);
+  gtk_check_menu_item_set_draw_as_radio (GTK_CHECK_MENU_ITEM (mi), radio);
+  gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (mi), active);   /* before connecting */
+  g_object_set_data (G_OBJECT (mi), KEY_KIND, GINT_TO_POINTER ((int) kind));
+  gbk_connect (G_OBJECT (w), mi, "activate", G_CALLBACK (on_menu_item), w);
+  gtk_menu_shell_append (GTK_MENU_SHELL (menu), mi);
+  return mi;
+}
+
+static void
+add_open_with (GbkWindow *w, GtkWidget *menu, const char *mime)
+{
+  GList *apps = g_app_info_get_recommended_for_type (mime);
+  if (apps == nullptr)
+    return;
+  GtkWidget *sub = gtk_menu_new ();
+  for (GList *l = apps; l != nullptr; l = l->next)
+    {
+      GAppInfo *app = l->data;
+      g_autofree char *label = g_strdup (g_app_info_get_display_name (app));
+      GtkWidget *mi = menu_item (w, sub, label, GBK_MENU_OPEN_WITH);
+      g_object_set_data_full (G_OBJECT (mi), KEY_APP, g_object_ref (app), g_object_unref);
+    }
+  g_list_free_full (apps, g_object_unref);
+  GtkWidget *parent = gtk_menu_item_new_with_label ("Open With");
+  gtk_menu_item_set_submenu (GTK_MENU_ITEM (parent), sub);
+  gtk_menu_shell_append (GTK_MENU_SHELL (menu), parent);
+}
+
+static bool
+destroy_menu (void *data)
+{
+  gtk_widget_destroy (GTK_WIDGET (data));
+  return false;
+}
+
+static void
+on_menu_deactivate (GtkMenuShell *menu, void *data G_GNUC_UNUSED)
+{
+  /* "deactivate" comes before the chosen item's "activate": destroy on the next idle. */
+  gbk_idle_add (G_OBJECT (menu), destroy_menu, menu);
+}
+
+static void
+on_attach_destroyed (GtkWidget *attach G_GNUC_UNUSED, GtkWidget *menu)
+{
+  gtk_widget_destroy (menu);
+}
+
+static void
+on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
+{
+  g_autoptr (GPtrArray) items = snapshot_selection (w);
+  bool background = items->len == 0;
+  if (background)
+    g_ptr_array_add (items, gbk_item_new_dir (w->path));
+
+  g_autoptr (GArray) entries = gbk_menu_entries (w->ctx->config, items, background);
+  GtkWidget *menu = gtk_menu_new ();
+  g_object_set_data_full (G_OBJECT (menu), KEY_ITEMS, g_ptr_array_ref (items),
+                          (GDestroyNotify) g_ptr_array_unref);
+
+  for (guint i = 0; i < entries->len; i++)
+    {
+      const GbkMenuEntry *e = &g_array_index (entries, GbkMenuEntry, i);
+      switch (e->kind)
+        {
+        case GBK_MENU_SEPARATOR:
+          gtk_menu_shell_append (GTK_MENU_SHELL (menu), gtk_separator_menu_item_new ());
+          break;
+        case GBK_MENU_OPEN: menu_item (w, menu, "Open", e->kind); break;
+        case GBK_MENU_OPEN_WITH: add_open_with (w, menu, gbk_menu_common_mime (items)); break;
+        case GBK_MENU_EXECUTE: menu_item (w, menu, "Execute", e->kind); break;
+        case GBK_MENU_EXECUTE_TERMINAL: menu_item (w, menu, "Execute in Terminal", e->kind); break;
+        case GBK_MENU_TERMINAL_HERE: menu_item (w, menu, "Open Terminal Here", e->kind); break;
+        case GBK_MENU_ACTION:
+          {
+            GtkWidget *mi = menu_item (w, menu, e->action->name, e->kind);
+            g_object_set_data (G_OBJECT (mi), KEY_ACTION, e->action);
+            break;
+          }
+        case GBK_MENU_SORT_NAME:
+          check_item (w, menu, "Sort by Name", e->kind, w->sort == GBK_SORT_NAME, true);
+          break;
+        case GBK_MENU_SORT_MTIME:
+          check_item (w, menu, "Sort by Date Modified", e->kind, w->sort == GBK_SORT_MTIME, true);
+          break;
+        case GBK_MENU_SHOW_HIDDEN:
+          check_item (w, menu, "Show Hidden Files", e->kind, w->show_hidden, false);
+          break;
+        default:
+          gbk_fatal ("bad menu entry kind %d", (int) e->kind);
+        }
+    }
+
+  gtk_menu_attach_to_widget (GTK_MENU (menu), GTK_WIDGET (v), nullptr);
+  gbk_connect (G_OBJECT (menu), menu, "deactivate", G_CALLBACK (on_menu_deactivate), nullptr);
+  /* A GtkMenu is its own toplevel: destroying the widget it's attached to doesn't destroy
+   * it. Tie it to the view, or closing the window with a menu open leaks the menu. */
+  gbk_connect (G_OBJECT (menu), v, "destroy", G_CALLBACK (on_attach_destroyed), menu);
+  gtk_widget_show_all (menu);
+  /* Keyboard-triggered menus come without an event; GTK needs one (for the grab), and the
+   * key press being handled is it. */
+  g_autoptr (GdkEvent) current = event == nullptr ? gtk_get_current_event () : nullptr;
+  GdkEvent *trigger = event != nullptr ? event : current;
+  if (trigger != nullptr && trigger->type == GDK_BUTTON_PRESS)
+    gtk_menu_popup_at_pointer (GTK_MENU (menu), trigger);
+  else
+    gtk_menu_popup_at_widget (GTK_MENU (menu), GTK_WIDGET (v), GDK_GRAVITY_CENTER,
+                              GDK_GRAVITY_NORTH_WEST, trigger);
 }
 
 static void
@@ -315,13 +594,9 @@ static void
 action_terminal (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
 {
   GbkWindow *w = data;
-  GbkCommandArgs args = { .dir = w->path };
   g_autoptr (GError) error = nullptr;
-  if (!gbk_launch_command (w->ctx->config->terminal, &args, &error))
-    {
-      g_autofree char *msg = g_strdup_printf ("Terminal: %s", error->message);
-      set_message (w, msg);
-    }
+  if (!gbk_open_terminal (w->ctx->config, w->path, &error))
+    report (w, "Terminal", error);
 }
 
 static void
@@ -409,6 +684,7 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   gbk_connect (G_OBJECT (w), w->view, "activate", G_CALLBACK (on_activate), w);
   gbk_connect (G_OBJECT (w), w->view, "selection-changed", G_CALLBACK (on_selection_changed), w);
   gbk_connect (G_OBJECT (w), w->view, "search-changed", G_CALLBACK (on_selection_changed), w);
+  gbk_connect (G_OBJECT (w), w->view, "context-menu", G_CALLBACK (on_context_menu), w);
 
   gbk_window_open (w, path);
   gtk_widget_grab_focus (GTK_WIDGET (w->view));
