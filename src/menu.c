@@ -46,6 +46,7 @@ gbk_menu_entries (const GbkConfig *config, GPtrArray *items, bool background)
   if (background)
     {
       add (out, GBK_MENU_PASTE, nullptr);
+      add (out, GBK_MENU_COPY_PATH, nullptr);
       add (out, GBK_MENU_SEPARATOR, nullptr);
       add (out, GBK_MENU_TERMINAL_HERE, nullptr);
     }
@@ -66,6 +67,7 @@ gbk_menu_entries (const GbkConfig *config, GPtrArray *items, bool background)
       add (out, GBK_MENU_COPY, nullptr);
       if (only != nullptr && only->is_dir)
         add (out, GBK_MENU_PASTE_INTO, nullptr);
+      add (out, GBK_MENU_COPY_PATH, nullptr);
       add (out, GBK_MENU_SEPARATOR, nullptr);
       add (out, GBK_MENU_TRASH, nullptr);
       add (out, GBK_MENU_DELETE, nullptr);

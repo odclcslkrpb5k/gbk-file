@@ -77,6 +77,13 @@ gbk_clipboard_set_files (GtkWidget *widget, GPtrArray *paths, bool cut)
 }
 
 void
+gbk_clipboard_set_text (GtkWidget *widget, const char *text)
+{
+  /* Taking ownership runs payload_clear on any files payload of ours, resetting `owned`. */
+  gtk_clipboard_set_text (gtk_widget_get_clipboard (widget, GDK_SELECTION_CLIPBOARD), text, -1);
+}
+
+void
 gbk_clipboard_clear_if_ours (GtkWidget *widget)
 {
   if (owned != nullptr)

@@ -265,6 +265,31 @@ file_exists (void *data)
   return g_file_test (data, G_FILE_TEST_EXISTS);
 }
 
+/* The CLIPBOARD's text, read the way the app must (asynchronously). */
+static void
+got_text (GtkSelectionData *sd, void *data)
+{
+  g_autofree guchar *t = gtk_selection_data_get_text (sd);
+  *(char **) data = g_strdup (t != nullptr ? (const char *) t : "");
+}
+
+static bool
+string_set (void *data)
+{
+  return *(char **) data != nullptr;
+}
+
+static char *
+clipboard_text (GbkWindow *w)
+{
+  char *text = nullptr;
+  gbk_clipboard_request (G_OBJECT (w), gtk_widget_get_clipboard (GTK_WIDGET (w),
+                                                                 GDK_SELECTION_CLIPBOARD),
+                         gdk_atom_intern_static_string ("UTF8_STRING"), got_text, &text, nullptr);
+  g_assert_true (wait_until (string_set, &text));
+  return text;
+}
+
 static void
 test_context_menu (void)
 {
@@ -289,7 +314,7 @@ test_context_menu (void)
   GtkMenu *menu = open_context_menu (w);
   g_autofree char *labels = menu_labels (menu);
   g_assert_cmpstr (labels, ==,
-                   "Paste|-|Open Terminal Here|-|Sort by Name|Sort by Date Modified|-|"
+                   "Paste|Copy Full Path|-|Open Terminal Here|-|Sort by Name|Sort by Date Modified|-|"
                    "Show Hidden Files");
   const char *first = gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0)));
   g_assert_cmpstr (first, ==, "a-old");
@@ -299,6 +324,13 @@ test_context_menu (void)
                    ==, "a-old");                     /* oldest last */
   g_assert_true (wait_until (menus_gone, w));       /* destroyed after closing */
 
+  /* Copy Full Path on empty space: the folder's own path. */
+  choose (open_context_menu (w), "Copy Full Path");
+  g_autofree char *here_text = clipboard_text (w);
+  g_assert_cmpstr (here_text, ==, root);
+  g_assert_cmpstr (gbk_window_status (w), ==, "Path copied");
+  g_assert_true (wait_until (menus_gone, w));
+
   /* Item menu on an extensionless executable: Execute runs it. */
   gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (m, "prog"));
   menu = open_context_menu (w);
@@ -307,6 +339,22 @@ test_context_menu (void)
   g_assert_nonnull (strstr (labels2, "Execute|Execute in Terminal"));
   choose (menu, "Execute");
   g_assert_true (wait_until (file_exists, marker));
+  g_assert_true (wait_until (menus_gone, w));
+
+  /* Copy Full Path on items: one path per line, no trailing newline (a terminal would run
+   * it on paste). */
+  choose (open_context_menu (w), "Copy Full Path");
+  g_autofree char *one = clipboard_text (w);
+  g_assert_cmpstr (one, ==, prog);
+  g_assert_true (wait_until (menus_gone, w));
+  gbk_view_select_all (gbk_window_view (w));
+  choose (open_context_menu (w), "Copy Full Path");
+  g_autofree char *all = clipboard_text (w);
+  /* Visible order: newest first since the earlier menu choice ("ran" is Execute's marker). */
+  g_autofree char *expect = g_strdup_printf ("%s\n%s/b-new\n%s\n%s/a-old", marker, root, prog,
+                                             root);
+  g_assert_cmpstr (all, ==, expect);
+  g_assert_cmpstr (gbk_window_status (w), ==, "4 paths copied");
   g_assert_true (wait_until (menus_gone, w));
 
   /* Double-click (activate) on it runs it too. */

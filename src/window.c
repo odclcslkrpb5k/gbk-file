@@ -1,5 +1,6 @@
 #include "window.h"
 #include "clipboard.h"
+#include "cliptext.h"
 #include "jobui.h"
 #include "lifetime.h"
 #include "menu.h"
@@ -513,6 +514,19 @@ menu_items_of (GtkWidget *menu_item)
   return g_object_get_data (G_OBJECT (menu_of (menu_item)), KEY_ITEMS);
 }
 
+/* Paths are shown as display names: exact for UTF-8 names (the norm), with U+FFFD for bytes
+ * that can't be text at all. */
+static void
+copy_paths (GbkWindow *w, GbkBrowser *b, GPtrArray *items)
+{
+  g_autoptr (GPtrArray) paths = paths_of (items);
+  g_autofree char *text = gbk_clip_format_text (paths);
+  gbk_clipboard_set_text (GTK_WIDGET (w), text);
+  g_autofree char *msg = items->len == 1 ? g_strdup ("Path copied")
+                                         : g_strdup_printf ("%u paths copied", items->len);
+  gbk_browser_set_message (b, msg);
+}
+
 static void
 on_menu_item (GtkMenuItem *mi, GbkWindow *w)
 {
@@ -565,6 +579,7 @@ on_menu_item (GtkMenuItem *mi, GbkWindow *w)
       break;
     case GBK_MENU_CUT: copy_items (w, b, items, true); break;
     case GBK_MENU_COPY: copy_items (w, b, items, false); break;
+    case GBK_MENU_COPY_PATH: copy_paths (w, b, items); break;
     case GBK_MENU_PASTE: paste_into (w, here); break;
     case GBK_MENU_PASTE_INTO: paste_into (w, first->path); break;
     case GBK_MENU_TRASH: trash_items (w, items); break;
@@ -687,6 +702,7 @@ on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
           break;
         case GBK_MENU_CUT: menu_item (w, menu, "Cut", e->kind); break;
         case GBK_MENU_COPY: menu_item (w, menu, "Copy", e->kind); break;
+        case GBK_MENU_COPY_PATH: menu_item (w, menu, "Copy Full Path", e->kind); break;
         case GBK_MENU_PASTE: menu_item (w, menu, "Paste", e->kind); break;
         case GBK_MENU_PASTE_INTO: menu_item (w, menu, "Paste Into Folder", e->kind); break;
         case GBK_MENU_TRASH: menu_item (w, menu, "Move to Trash", e->kind); break;

@@ -235,7 +235,9 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   With (same-type files; window lists g_app_info_get_recommended_for_type), Execute(+Term)
   for one runnable file, Open Terminal Here for one folder, then actions matching ALL
   items. Background: Terminal Here, dir actions, Sort by Name/Date Modified, Show Hidden.
-  Window builds GtkMenu: items' data owned by menu (KEY_ITEMS snapshot), activations
+  Copy Full Path (user, 2026-10-11) on items (after Copy/Paste Into) and background (after
+  Paste): plain text only, one path per line, NO trailing newline (terminal paste would run
+  it); replaces our files clipboard. Window builds GtkMenu: items' data owned by menu (KEY_ITEMS snapshot), activations
   connected with window as owner; menu destroyed on idle after deactivate AND when the view
   is destroyed (GtkMenu is a toplevel: attach-widget destroy does NOT destroy it — leaked
   once, caught by the lifetime counter). Keyboard popups use gtk_get_current_event() as the
