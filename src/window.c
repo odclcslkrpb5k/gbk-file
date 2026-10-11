@@ -5,338 +5,229 @@
 #include "menu.h"
 #include "open.h"
 
-#define HISTORY_MAX 100
-
 struct _GbkWindow
 {
   GtkApplicationWindow parent_instance;
 
   GbkContext *ctx;
-  GbkView *view;
+  GbkPathbar *pathbar;
+  GtkNotebook *tabs;
   GtkLabel *status;
 
-  char *path;
-  GbkDirModel *model;
-  gulong model_state_id;
-  gulong model_changed_id;
-
-  GPtrArray *back;        /* char* paths, most recent last */
-  GPtrArray *forward;
-
-  bool show_hidden;
+  bool show_hidden;       /* window-wide: applies to every tab */
   GbkSortMode sort;
-  char *focus_on_load;    /* raw name to select once it appears (after going up) */
-  GPtrArray *pending_select;  /* names to select as they appear (after paste/rename) */
-  guint pending_timeout;
   char *paste_dest;       /* destination of the paste request in flight */
-  char *message;          /* transient error shown in the status bar */
 };
 
 G_DEFINE_FINAL_TYPE (GbkWindow, gbk_window, GTK_TYPE_APPLICATION_WINDOW)
 
-/* ---- status bar ---- */
+/* ---- tabs ---- */
 
-static char *
-format_size (uint64_t bytes)
+static GbkBrowser *
+active (GbkWindow *w)
 {
-  return g_format_size_full (bytes, G_FORMAT_SIZE_IEC_UNITS);
+  int i = gtk_notebook_get_current_page (w->tabs);
+  if (i < 0)
+    gbk_fatal ("window without tabs");
+  return GBK_BROWSER (gtk_notebook_get_nth_page (w->tabs, i));
+}
+
+static GbkBrowser *
+browser_of (GbkView *v)
+{
+  GtkWidget *b = gtk_widget_get_ancestor (GTK_WIDGET (v), GBK_TYPE_BROWSER);
+  if (b == nullptr)
+    gbk_fatal ("view outside a browser");
+  return GBK_BROWSER (b);
 }
 
 static void
 update_status (GbkWindow *w)
 {
-  g_autoptr (GString) s = g_string_new ("");
-  GbkDirModel *m = w->model;
-  const char *search = gbk_view_type_ahead_text (w->view);
-
-  if (w->message != nullptr)
-    g_string_append (s, w->message);
-  else if (search[0] != '\0')
-    g_string_append_printf (s, "Find: %s", search);
-  else if (m == nullptr)
-    ;
-  else if (gbk_dir_model_state (m) == GBK_DIR_ERROR)
-    g_string_append_printf (s, "Can't open: %s", g_strerror (gbk_dir_model_error (m)));
-  else
-    {
-      size_t n_sel;
-      g_autofree GbkHandle *sel = gbk_view_selected (w->view, &n_sel);
-      if (n_sel == 1)
-        {
-          const GbkEntry *e = gbk_dir_model_get (m, sel[0]);
-          g_string_append_printf (s, "\"%s\"", gbk_entry_display (e));
-          if (gbk_entry_is_dir (e))
-            g_string_append (s, " folder");
-          else if (!(e->flags & GBK_ENTRY_STAT_FAILED))
-            {
-              g_autofree char *size = format_size (e->size);
-              g_string_append_printf (s, " (%s)", size);
-            }
-        }
-      else if (n_sel > 1)
-        {
-          uint64_t total = 0;
-          for (size_t i = 0; i < n_sel; i++)
-            {
-              const GbkEntry *e = gbk_dir_model_get (m, sel[i]);
-              if (!gbk_entry_is_dir (e))
-                total += e->size;
-            }
-          g_autofree char *size = format_size (total);
-          g_string_append_printf (s, "%zu items selected (%s)", n_sel, size);
-        }
-      else
-        {
-          size_t n = gbk_dir_model_n_visible (m), dirs = 0;
-          for (size_t i = 0; i < n; i++)
-            if (gbk_entry_is_dir (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, i))))
-              dirs++;
-          size_t files = n - dirs;
-          if (dirs > 0)
-            g_string_append_printf (s, "%zu %s", dirs, dirs == 1 ? "folder" : "folders");
-          if (files > 0)
-            g_string_append_printf (s, "%s%zu %s", dirs > 0 ? ", " : "", files,
-                                    files == 1 ? "file" : "files");
-          if (n == 0)
-            g_string_append (s, gbk_dir_model_state (m) == GBK_DIR_LOADING ? "Loading…" : "Empty");
-        }
-      uint64_t free_bytes;
-      if (gbk_dir_model_free_space (m, &free_bytes))
-        {
-          g_autofree char *size = format_size (free_bytes);
-          g_string_append_printf (s, "  |  Free space: %s", size);
-        }
-    }
-  gtk_label_set_text (w->status, s->str);
+  g_autofree char *text = gbk_browser_status (active (w));
+  gtk_label_set_text (w->status, text);
 }
 
 static void
-set_message (GbkWindow *w, const char *message)
+update_chrome (GbkWindow *w)
 {
-  g_free (w->message);
-  w->message = g_strdup (message);
-  update_status (w);
-}
-
-/* ---- navigation ---- */
-
-static void
-update_title (GbkWindow *w)
-{
-  g_autofree char *base = g_path_get_basename (w->path);
+  GbkBrowser *b = active (w);
+  const char *path = gbk_browser_path (b);
+  g_autofree char *base = g_path_get_basename (path);
   g_autofree char *shown = g_filename_display_name (base);
   g_autofree char *title = g_strdup_printf ("%s - gbk-file", shown);
   gtk_window_set_title (GTK_WINDOW (w), title);
-}
-
-static void open_path (GbkWindow *w, const char *path, const char *focus_name);
-
-/* Select whichever pending names exist (they arrive via live updates, possibly in several
- * batches). Stops once all are there, on navigation, or after a short while. */
-static void
-apply_pending_select (GbkWindow *w)
-{
-  if (w->pending_select == nullptr || w->model == nullptr)
-    return;
-  g_autofree GbkHandle *handles = g_new (GbkHandle, MAX (w->pending_select->len, 1));
-  size_t n = 0;
-  for (guint i = 0; i < w->pending_select->len; i++)
-    {
-      GbkHandle h = gbk_dir_model_find (w->model, g_ptr_array_index (w->pending_select, i));
-      if (h != GBK_HANDLE_NONE)
-        handles[n++] = h;
-    }
-  if (n > 0)
-    gbk_view_set_selection (w->view, handles, n);
-  if (n == w->pending_select->len)
-    {
-      g_clear_pointer (&w->pending_select, g_ptr_array_unref);
-      gbk_source_cancel (&w->pending_timeout);
-    }
-}
-
-static bool
-pending_expired (void *data)
-{
-  GbkWindow *w = data;
-  w->pending_timeout = 0;
-  g_clear_pointer (&w->pending_select, g_ptr_array_unref);
-  return false;
-}
-
-static void
-set_pending_select (GbkWindow *w, GPtrArray *names)
-{
-  g_clear_pointer (&w->pending_select, g_ptr_array_unref);
-  gbk_source_cancel (&w->pending_timeout);
-  if (names == nullptr || names->len == 0)
-    return;
-  w->pending_select = g_ptr_array_new_with_free_func (g_free);
-  for (guint i = 0; i < names->len; i++)
-    g_ptr_array_add (w->pending_select, g_strdup (g_ptr_array_index (names, i)));
-  w->pending_timeout = gbk_timeout_add (G_OBJECT (w), 2000, pending_expired, w);
-  apply_pending_select (w);
-}
-
-static void
-on_model_changed (GbkDirModel *m, GbkWindow *w)
-{
-  if (m != w->model)
-    return;
-  if (w->focus_on_load != nullptr)
-    {
-      GbkHandle h = gbk_dir_model_find (m, w->focus_on_load);
-      if (h != GBK_HANDLE_NONE)
-        {
-          gbk_view_select_only (w->view, h);
-          g_clear_pointer (&w->focus_on_load, g_free);
-        }
-    }
-  apply_pending_select (w);
+  gbk_pathbar_set_path (w->pathbar, path);
   update_status (w);
 }
 
 static void
-on_model_state (GbkDirModel *m, GbkWindow *w)
+update_tab_label (GbkBrowser *b)
 {
-  if (m != w->model)
-    return;
-  GbkDirState state = gbk_dir_model_state (m);
-  if (state == GBK_DIR_READY)
-    g_clear_pointer (&w->focus_on_load, g_free);   /* it never appeared: forget it */
+  GtkLabel *label = g_object_get_data (G_OBJECT (b), "gbk-tab-label");
+  g_autofree char *base = g_path_get_basename (gbk_browser_path (b));
+  g_autofree char *shown = g_filename_display_name (base);
+  gtk_label_set_text (label, shown);
+  /* An ellipsizing label asks only for "…": give it room for the name, up to a cap. */
+  gtk_label_set_width_chars (label, (int) MIN (g_utf8_strlen (shown, -1) + 2, 32));
+  gtk_widget_set_tooltip_text (GTK_WIDGET (label), gbk_browser_path (b));
+}
 
-  /* The directory vanished (deleted, moved, unmounted) or never existed: walk up to the
-   * nearest ancestor. Each level is another async attempt, so nothing blocks. */
-  bool missing = state == GBK_DIR_GONE
-                 || (state == GBK_DIR_ERROR && (gbk_dir_model_error (m) == ENOENT
-                                                || gbk_dir_model_error (m) == ENOTDIR));
-  if (missing && !g_str_equal (w->path, "/"))
+static void
+on_browser_path (GbkBrowser *b, GbkWindow *w)
+{
+  update_tab_label (b);
+  if (b == active (w))
+    update_chrome (w);
+}
+
+static void
+on_browser_status (GbkBrowser *b, GbkWindow *w)
+{
+  if (b == active (w))
+    update_status (w);
+}
+
+static void
+close_tab (GbkWindow *w, GbkBrowser *b)
+{
+  if (gtk_notebook_get_n_pages (w->tabs) <= 1)
     {
-      g_autofree char *parent = g_path_get_dirname (w->path);
-      g_autofree char *child = g_path_get_basename (w->path);
-      open_path (w, parent, child);
+      gtk_window_close (GTK_WINDOW (w));
       return;
     }
-  update_status (w);
+  gtk_widget_destroy (GTK_WIDGET (b));
 }
 
 static void
-set_model (GbkWindow *w, GbkDirModel *m)
+on_tab_close_clicked (GtkButton *button G_GNUC_UNUSED, GbkBrowser *b)
 {
-  if (w->model != nullptr)
+  GbkWindow *w = GBK_WINDOW (gtk_widget_get_toplevel (GTK_WIDGET (b)));
+  close_tab (w, b);
+}
+
+static void
+update_tabs_visible (GbkWindow *w)
+{
+  /* Like Thunar: no tab bar until there's a second tab. */
+  gtk_notebook_set_show_tabs (w->tabs, gtk_notebook_get_n_pages (w->tabs) > 1);
+}
+
+static void on_activate (GbkView *v, GbkWindow *w);
+static void on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w);
+
+static GbkBrowser *
+add_tab (GbkWindow *w, const char *path, bool switch_to)
+{
+  GbkBrowser *b = gbk_browser_new (w->ctx, w->show_hidden, w->sort);
+
+  GtkWidget *label_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+  GtkWidget *label = gtk_label_new ("");
+  gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_MIDDLE);
+  gtk_label_set_max_width_chars (GTK_LABEL (label), 30);
+  GtkWidget *close = gtk_button_new_from_icon_name ("window-close-symbolic", GTK_ICON_SIZE_MENU);
+  gtk_button_set_relief (GTK_BUTTON (close), GTK_RELIEF_NONE);
+  gtk_widget_set_focus_on_click (close, false);
+  gtk_box_pack_start (GTK_BOX (label_box), label, true, true, 0);
+  gtk_box_pack_start (GTK_BOX (label_box), close, false, false, 0);
+  gtk_widget_show_all (label_box);
+  g_object_set_data (G_OBJECT (b), "gbk-tab-label", label);
+
+  /* Open before joining the notebook: inserting the first page emits "switch-page", which
+   * reads the tab's path. */
+  gbk_browser_open (b, path);
+
+  GbkView *v = gbk_browser_view (b);
+  gbk_connect (G_OBJECT (b), close, "clicked", G_CALLBACK (on_tab_close_clicked), b);
+  gbk_connect (G_OBJECT (w), b, "path-changed", G_CALLBACK (on_browser_path), w);
+  gbk_connect (G_OBJECT (w), b, "status-changed", G_CALLBACK (on_browser_status), w);
+  gbk_connect (G_OBJECT (w), v, "activate", G_CALLBACK (on_activate), w);
+  gbk_connect (G_OBJECT (w), v, "context-menu", G_CALLBACK (on_context_menu), w);
+
+  gtk_widget_show_all (GTK_WIDGET (b));
+  int at = gtk_notebook_get_current_page (w->tabs) + 1;
+  gtk_notebook_insert_page (w->tabs, GTK_WIDGET (b), label_box, at);
+  gtk_notebook_set_tab_reorderable (w->tabs, GTK_WIDGET (b), true);
+  update_tab_label (b);
+  update_tabs_visible (w);
+  if (switch_to)
     {
-      g_signal_handler_disconnect (w->model, w->model_state_id);
-      g_signal_handler_disconnect (w->model, w->model_changed_id);
-      g_clear_object (&w->model);
+      gtk_notebook_set_current_page (w->tabs, gtk_notebook_page_num (w->tabs, GTK_WIDGET (b)));
+      gtk_widget_grab_focus (GTK_WIDGET (v));
     }
-  w->model = m;     /* takes the reference */
-  if (m != nullptr)
-    {
-      gbk_dir_model_set_show_hidden (m, w->show_hidden);
-      gbk_dir_model_set_sort (m, w->sort);
-      w->model_state_id = gbk_connect (G_OBJECT (w), m, "state-changed",
-                                       G_CALLBACK (on_model_state), w);
-      w->model_changed_id = gbk_connect (G_OBJECT (w), m, "changed",
-                                         G_CALLBACK (on_model_changed), w);
-    }
-  gbk_view_set_model (w->view, m);
-}
-
-/* Replace the current directory without touching history. */
-static void
-open_path (GbkWindow *w, const char *path, const char *focus_name)
-{
-  g_free (w->path);
-  w->path = g_canonicalize_filename (path, nullptr);
-  g_free (w->focus_on_load);
-  w->focus_on_load = g_strdup (focus_name);
-  set_pending_select (w, nullptr);
-  g_clear_pointer (&w->message, g_free);
-  set_model (w, gbk_dir_model_new (w->path, w->ctx->types));
-  update_title (w);
-  update_status (w);
+  return b;
 }
 
 static void
-push_history (GPtrArray *stack, const char *path)
+on_switch_page (GtkNotebook *nb G_GNUC_UNUSED, GtkWidget *page, guint n G_GNUC_UNUSED, GbkWindow *w)
 {
-  if (stack->len >= HISTORY_MAX)
-    g_ptr_array_remove_index (stack, 0);
-  g_ptr_array_add (stack, g_strdup (path));
-}
-
-void
-gbk_window_open (GbkWindow *w, const char *path)
-{
-  if (w->path != nullptr)
-    {
-      g_autofree char *canon = g_canonicalize_filename (path, nullptr);
-      if (g_str_equal (canon, w->path))
-        return;
-      push_history (w->back, w->path);
-      g_ptr_array_set_size (w->forward, 0);
-    }
-  open_path (w, path, nullptr);
+  /* "switch-page" runs before the current page changes: use the page we're given. */
+  GbkBrowser *b = GBK_BROWSER (page);
+  g_autofree char *base = g_path_get_basename (gbk_browser_path (b));
+  g_autofree char *shown = g_filename_display_name (base);
+  g_autofree char *title = g_strdup_printf ("%s - gbk-file", shown);
+  gtk_window_set_title (GTK_WINDOW (w), title);
+  gbk_pathbar_reset (w->pathbar, gbk_browser_path (b));   /* deeper buttons were per tab */
+  g_autofree char *text = gbk_browser_status (b);
+  gtk_label_set_text (w->status, text);
+  gtk_widget_grab_focus (GTK_WIDGET (gbk_browser_view (b)));
 }
 
 static void
-go_back (GbkWindow *w)
+on_page_removed (GtkNotebook *nb G_GNUC_UNUSED, GtkWidget *child G_GNUC_UNUSED,
+                 guint n G_GNUC_UNUSED, GbkWindow *w)
 {
-  if (w->back->len == 0)
-    return;
-  g_autofree char *target = g_ptr_array_steal_index (w->back, w->back->len - 1);
-  g_autofree char *came_from = g_path_get_basename (w->path);
-  push_history (w->forward, w->path);
-  /* If we're going back to the parent we came from, select where we were. */
-  g_autofree char *parent = g_path_get_dirname (w->path);
-  open_path (w, target, g_str_equal (parent, target) ? came_from : nullptr);
+  update_tabs_visible (w);
 }
 
 static void
-go_forward (GbkWindow *w)
+set_show_hidden (GbkWindow *w, bool show)
 {
-  if (w->forward->len == 0)
-    return;
-  g_autofree char *target = g_ptr_array_steal_index (w->forward, w->forward->len - 1);
-  push_history (w->back, w->path);
-  open_path (w, target, nullptr);
+  w->show_hidden = show;
+  for (int i = 0; i < gtk_notebook_get_n_pages (w->tabs); i++)
+    gbk_browser_set_show_hidden (GBK_BROWSER (gtk_notebook_get_nth_page (w->tabs, i)), show);
+  GAction *a = g_action_map_lookup_action (G_ACTION_MAP (w), "show-hidden");
+  g_simple_action_set_state (G_SIMPLE_ACTION (a), g_variant_new_boolean (show));
 }
 
 static void
-go_up (GbkWindow *w)
+set_sort (GbkWindow *w, GbkSortMode sort)
 {
-  if (g_str_equal (w->path, "/"))
-    return;
-  g_autofree char *parent = g_path_get_dirname (w->path);
-  g_autofree char *child = g_path_get_basename (w->path);
-  push_history (w->back, w->path);
-  g_ptr_array_set_size (w->forward, 0);
-  open_path (w, parent, child);
+  w->sort = sort;
+  for (int i = 0; i < gtk_notebook_get_n_pages (w->tabs); i++)
+    gbk_browser_set_sort (GBK_BROWSER (gtk_notebook_get_nth_page (w->tabs, i)), sort);
+  GAction *a = g_action_map_lookup_action (G_ACTION_MAP (w), "sort");
+  g_simple_action_set_state (G_SIMPLE_ACTION (a),
+                             g_variant_new_string (sort == GBK_SORT_MTIME ? "modified" : "name"));
 }
 
 /* ---- opening things ---- */
 
 /* The selection as owned GbkItems: safe to keep while the model changes underneath. */
 static GPtrArray *
-snapshot_selection (GbkWindow *w)
+snapshot_selection (GbkWindow *w, GbkBrowser *b)
 {
   GPtrArray *items = g_ptr_array_new_with_free_func ((GDestroyNotify) gbk_item_free);
+  GbkDirModel *m = gbk_browser_model (b);
+  if (m == nullptr)
+    return items;
   size_t n;
-  g_autofree GbkHandle *sel = gbk_view_selected (w->view, &n);
+  g_autofree GbkHandle *sel = gbk_view_selected (gbk_browser_view (b), &n);
   for (size_t i = 0; i < n; i++)
     {
-      const GbkEntry *e = gbk_dir_model_get (w->model, sel[i]);
+      const GbkEntry *e = gbk_dir_model_get (m, sel[i]);
       if (e != nullptr)
-        g_ptr_array_add (items, gbk_item_new (w->ctx->config, w->ctx->types, w->path, e));
+        g_ptr_array_add (items, gbk_item_new (w->ctx->config, w->ctx->types,
+                                              gbk_browser_path (b), e));
     }
   return items;
 }
 
 static void
-report (GbkWindow *w, const char *what, const GError *error)
+report (GbkBrowser *b, const char *what, const GError *error)
 {
   g_autofree char *msg = g_strdup_printf ("%s: %s", what, error->message);
-  set_message (w, msg);
+  gbk_browser_set_message (b, msg);
 }
 
 static GAppLaunchContext *
@@ -347,14 +238,14 @@ launch_context (GbkWindow *w)
   return G_APP_LAUNCH_CONTEXT (lc);
 }
 
-/* Double-click / Enter. A single folder is entered; files are run or opened per
- * gbk_open_plan. (Folders in a multi-selection are skipped until there are tabs.) */
+/* Double-click / Enter. A single folder is entered; several folders open in new tabs;
+ * files are run or opened per gbk_open_plan. */
 static void
-open_items (GbkWindow *w, GPtrArray *items)
+open_items (GbkWindow *w, GbkBrowser *b, GPtrArray *items)
 {
   if (items->len == 1 && ((GbkItem *) g_ptr_array_index (items, 0))->is_dir)
     {
-      gbk_window_open (w, ((GbkItem *) g_ptr_array_index (items, 0))->path);
+      gbk_browser_open (b, ((GbkItem *) g_ptr_array_index (items, 0))->path);
       return;
     }
   g_autoptr (GPtrArray) by_default = g_ptr_array_new ();
@@ -365,14 +256,15 @@ open_items (GbkWindow *w, GPtrArray *items)
       switch (gbk_open_plan (it))
         {
         case GBK_OPEN_ENTER:
+          add_tab (w, it->path, false);
           break;
         case GBK_OPEN_RUN:
-          if (!gbk_open_execute (w->ctx->config, it, false, w->path, &error))
-            report (w, it->display, error);
+          if (!gbk_open_execute (w->ctx->config, it, false, gbk_browser_path (b), &error))
+            report (b, it->display, error);
           break;
         case GBK_OPEN_RUN_TERMINAL:
-          if (!gbk_open_execute (w->ctx->config, it, true, w->path, &error))
-            report (w, it->display, error);
+          if (!gbk_open_execute (w->ctx->config, it, true, gbk_browser_path (b), &error))
+            report (b, it->display, error);
           break;
         case GBK_OPEN_DEFAULT:
           g_ptr_array_add (by_default, it);
@@ -386,17 +278,18 @@ open_items (GbkWindow *w, GPtrArray *items)
       g_autoptr (GAppLaunchContext) lc = launch_context (w);
       g_autoptr (GError) error = nullptr;
       if (!gbk_open_default (by_default, lc, &error))
-        report (w, "Open", error);
+        report (b, "Open", error);
     }
 }
 
 /* ---- view events ---- */
 
 static void
-on_activate (GbkView *v G_GNUC_UNUSED, GbkWindow *w)
+on_activate (GbkView *v, GbkWindow *w)
 {
-  g_autoptr (GPtrArray) items = snapshot_selection (w);
-  open_items (w, items);
+  GbkBrowser *b = browser_of (v);
+  g_autoptr (GPtrArray) items = snapshot_selection (w, b);
+  open_items (w, b, items);
 }
 
 /* ---- file operations ---- */
@@ -415,10 +308,16 @@ on_job_finished (GbkJob *job, GError *error, GbkWindow *w)
 {
   if (error == nullptr && g_object_get_data (G_OBJECT (job), "gbk-from-cut") != nullptr)
     gbk_clipboard_clear_if_ours (GTK_WIDGET (w));
-  /* Select what was just created, if we're looking at where it went. */
-  if (gbk_job_dest (job) != nullptr && w->path != nullptr
-      && g_str_equal (gbk_job_dest (job), w->path))
-    set_pending_select (w, gbk_job_created (job));
+  /* Select what was just created in every tab looking at where it went. */
+  const char *dest = gbk_job_dest (job);
+  if (dest == nullptr)
+    return;
+  for (int i = 0; i < gtk_notebook_get_n_pages (w->tabs); i++)
+    {
+      GbkBrowser *b = GBK_BROWSER (gtk_notebook_get_nth_page (w->tabs, i));
+      if (g_str_equal (gbk_browser_path (b), dest))
+        gbk_browser_select_names (b, gbk_job_created (job));
+    }
 }
 
 static void
@@ -429,7 +328,7 @@ start_job (GbkWindow *w, GbkJob *job)
 }
 
 static void
-copy_items (GbkWindow *w, GPtrArray *items, bool cut)
+copy_items (GbkWindow *w, GbkBrowser *b, GPtrArray *items, bool cut)
 {
   if (items->len == 0)
     return;
@@ -438,7 +337,7 @@ copy_items (GbkWindow *w, GPtrArray *items, bool cut)
   g_autofree char *msg = g_strdup_printf ("%u %s %s", items->len,
                                           items->len == 1 ? "item" : "items",
                                           cut ? "cut" : "copied");
-  set_message (w, msg);
+  gbk_browser_set_message (b, msg);
 }
 
 static void
@@ -448,7 +347,7 @@ on_paste_files (GPtrArray *paths, bool cut, void *data)
   g_autofree char *dest = g_steal_pointer (&w->paste_dest);
   if (paths->len == 0 || dest == nullptr)
     {
-      set_message (w, "Nothing to paste");
+      gbk_browser_set_message (active (w), "Nothing to paste");
       return;
     }
   g_autoptr (GbkJob) job = gbk_job_new (cut ? GBK_OP_MOVE : GBK_OP_COPY, paths, dest);
@@ -538,6 +437,8 @@ on_rename_response (GtkDialog *d, int response, GbkWindow *w)
 static void
 rename_item (GbkWindow *w, const GbkItem *it)
 {
+  if (it == nullptr)
+    gbk_fatal ("rename without an item");
   GtkWidget *d = gtk_dialog_new_with_buttons ("Rename", GTK_WINDOW (w),
                                               GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
                                               "_Cancel", GTK_RESPONSE_CANCEL,
@@ -571,12 +472,13 @@ rename_item (GbkWindow *w, const GbkItem *it)
 #define KEY_KIND "gbk-kind"
 #define KEY_ACTION "gbk-action"
 #define KEY_APP "gbk-app"
+#define KEY_BROWSER "gbk-browser"
 
-static GPtrArray *
-menu_items_of (GtkWidget *menu_item)
+/* The top-level context menu an item belongs to (Open With items sit in a submenu). */
+static GtkWidget *
+menu_of (GtkWidget *menu_item)
 {
   GtkWidget *menu = gtk_widget_get_parent (menu_item);
-  /* Open With entries live in a submenu: its items are on the top-level menu. */
   while (menu != nullptr && g_object_get_data (G_OBJECT (menu), KEY_ITEMS) == nullptr)
     {
       GtkWidget *attach = GTK_IS_MENU (menu) ? gtk_menu_get_attach_widget (GTK_MENU (menu)) : nullptr;
@@ -584,30 +486,36 @@ menu_items_of (GtkWidget *menu_item)
     }
   if (menu == nullptr)
     gbk_fatal ("menu item without a snapshot");
-  return g_object_get_data (G_OBJECT (menu), KEY_ITEMS);
+  return menu;
 }
 
-static void
-set_sort (GbkWindow *w, GbkSortMode sort)
+static GPtrArray *
+menu_items_of (GtkWidget *menu_item)
 {
-  w->sort = sort;
-  if (w->model != nullptr)
-    gbk_dir_model_set_sort (w->model, sort);
+  return g_object_get_data (G_OBJECT (menu_of (menu_item)), KEY_ITEMS);
 }
 
 static void
 on_menu_item (GtkMenuItem *mi, GbkWindow *w)
 {
   GPtrArray *items = menu_items_of (GTK_WIDGET (mi));
+  /* The tab the menu was opened in (it may no longer be the active one). */
+  GbkBrowser *b = g_object_get_data (G_OBJECT (menu_of (GTK_WIDGET (mi))), KEY_BROWSER);
+  if (b == nullptr)
+    return;
+  const char *here = gbk_browser_path (b);
   GbkMenuKind kind = (GbkMenuKind) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (mi), KEY_KIND));
-  const GbkItem *first = items->len > 0 ? g_ptr_array_index (items, 0) : nullptr;
+  /* Invariant: a context menu always has a target (empty space = the folder itself). */
+  if (items->len == 0 || g_ptr_array_index (items, 0) == nullptr)
+    gbk_fatal ("context menu without a target");
+  const GbkItem *first = g_ptr_array_index (items, 0);
   g_autoptr (GError) error = nullptr;
   bool ok = true;
 
   switch (kind)
     {
     case GBK_MENU_OPEN:
-      open_items (w, items);
+      open_items (w, b, items);
       break;
     case GBK_MENU_OPEN_WITH:
       {
@@ -617,16 +525,16 @@ on_menu_item (GtkMenuItem *mi, GbkWindow *w)
         break;
       }
     case GBK_MENU_EXECUTE:
-      ok = gbk_open_execute (w->ctx->config, first, false, w->path, &error);
+      ok = gbk_open_execute (w->ctx->config, first, false, here, &error);
       break;
     case GBK_MENU_EXECUTE_TERMINAL:
-      ok = gbk_open_execute (w->ctx->config, first, true, w->path, &error);
+      ok = gbk_open_execute (w->ctx->config, first, true, here, &error);
       break;
     case GBK_MENU_TERMINAL_HERE:
       ok = gbk_open_terminal (w->ctx->config, first->path, &error);
       break;
     case GBK_MENU_ACTION:
-      ok = gbk_open_action (g_object_get_data (G_OBJECT (mi), KEY_ACTION), items, w->path, &error);
+      ok = gbk_open_action (g_object_get_data (G_OBJECT (mi), KEY_ACTION), items, here, &error);
       break;
     case GBK_MENU_SORT_NAME:
       set_sort (w, GBK_SORT_NAME);
@@ -635,11 +543,11 @@ on_menu_item (GtkMenuItem *mi, GbkWindow *w)
       set_sort (w, GBK_SORT_MTIME);
       break;
     case GBK_MENU_SHOW_HIDDEN:
-      g_action_group_activate_action (G_ACTION_GROUP (w), "toggle-hidden", nullptr);
+      set_show_hidden (w, !w->show_hidden);
       break;
-    case GBK_MENU_CUT: copy_items (w, items, true); break;
-    case GBK_MENU_COPY: copy_items (w, items, false); break;
-    case GBK_MENU_PASTE: paste_into (w, w->path); break;
+    case GBK_MENU_CUT: copy_items (w, b, items, true); break;
+    case GBK_MENU_COPY: copy_items (w, b, items, false); break;
+    case GBK_MENU_PASTE: paste_into (w, here); break;
     case GBK_MENU_PASTE_INTO: paste_into (w, first->path); break;
     case GBK_MENU_TRASH: trash_items (w, items); break;
     case GBK_MENU_DELETE: delete_items (w, items); break;
@@ -649,7 +557,7 @@ on_menu_item (GtkMenuItem *mi, GbkWindow *w)
       gbk_fatal ("bad menu entry kind %d", (int) kind);
     }
   if (!ok)
-    report (w, gtk_menu_item_get_label (mi), error);
+    report (b, gtk_menu_item_get_label (mi), error);
 }
 
 static GtkWidget *
@@ -718,15 +626,18 @@ on_attach_destroyed (GtkWidget *attach G_GNUC_UNUSED, GtkWidget *menu)
 static void
 on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
 {
-  g_autoptr (GPtrArray) items = snapshot_selection (w);
+  GbkBrowser *b = browser_of (v);
+  g_autoptr (GPtrArray) items = snapshot_selection (w, b);
   bool background = items->len == 0;
   if (background)
-    g_ptr_array_add (items, gbk_item_new_dir (w->path));
+    g_ptr_array_add (items, gbk_item_new_dir (gbk_browser_path (b)));
 
   g_autoptr (GArray) entries = gbk_menu_entries (w->ctx->config, items, background);
   GtkWidget *menu = gtk_menu_new ();
   g_object_set_data_full (G_OBJECT (menu), KEY_ITEMS, g_ptr_array_ref (items),
                           (GDestroyNotify) g_ptr_array_unref);
+  /* Borrowed: the menu dies with the view (below), and the view with the browser. */
+  g_object_set_data (G_OBJECT (menu), KEY_BROWSER, b);
 
   for (guint i = 0; i < entries->len; i++)
     {
@@ -785,137 +696,177 @@ on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
                               GDK_GRAVITY_NORTH_WEST, trigger);
 }
 
-static void
-on_selection_changed (GbkView *v G_GNUC_UNUSED, GbkWindow *w)
-{
-  g_clear_pointer (&w->message, g_free);
-  update_status (w);
-}
-
 /* ---- actions ---- */
 
-static void
-action_back (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
-{
-  go_back (data);
-}
+#define ACTION(name) \
+  static void name (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
 
-static void
-action_forward (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
-{
-  go_forward (data);
-}
+ACTION (action_back) { gbk_browser_back (active (data)); }
+ACTION (action_forward) { gbk_browser_forward (active (data)); }
+ACTION (action_up) { gbk_browser_up (active (data)); }
 
-static void
-action_up (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
-{
-  go_up (data);
-}
-
-static void
-action_toggle_hidden (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+ACTION (action_terminal)
 {
   GbkWindow *w = data;
-  w->show_hidden = !w->show_hidden;
-  if (w->model != nullptr)
-    gbk_dir_model_set_show_hidden (w->model, w->show_hidden);
-}
-
-static void
-action_terminal (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
-{
-  GbkWindow *w = data;
+  GbkBrowser *b = active (w);
   g_autoptr (GError) error = nullptr;
-  if (!gbk_open_terminal (w->ctx->config, w->path, &error))
-    report (w, "Terminal", error);
+  if (!gbk_open_terminal (w->ctx->config, gbk_browser_path (b), &error))
+    report (b, "Terminal", error);
 }
 
-static void
-action_copy (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+ACTION (action_copy)
 {
-  g_autoptr (GPtrArray) items = snapshot_selection (data);
-  copy_items (data, items, false);
+  g_autoptr (GPtrArray) items = snapshot_selection (data, active (data));
+  copy_items (data, active (data), items, false);
 }
 
-static void
-action_cut (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+ACTION (action_cut)
 {
-  g_autoptr (GPtrArray) items = snapshot_selection (data);
-  copy_items (data, items, true);
+  g_autoptr (GPtrArray) items = snapshot_selection (data, active (data));
+  copy_items (data, active (data), items, true);
 }
 
-static void
-action_paste (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
-{
-  GbkWindow *w = data;
-  paste_into (w, w->path);
-}
+ACTION (action_paste) { paste_into (data, gbk_browser_path (active (data))); }
 
-static void
-action_trash (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+ACTION (action_trash)
 {
-  g_autoptr (GPtrArray) items = snapshot_selection (data);
+  g_autoptr (GPtrArray) items = snapshot_selection (data, active (data));
   trash_items (data, items);
 }
 
-static void
-action_delete (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+ACTION (action_delete)
 {
-  g_autoptr (GPtrArray) items = snapshot_selection (data);
+  g_autoptr (GPtrArray) items = snapshot_selection (data, active (data));
   delete_items (data, items);
 }
 
-static void
-action_rename (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+ACTION (action_rename)
 {
-  g_autoptr (GPtrArray) items = snapshot_selection (data);
+  g_autoptr (GPtrArray) items = snapshot_selection (data, active (data));
   if (items->len == 1)
     rename_item (data, g_ptr_array_index (items, 0));
 }
 
-static void
-action_close (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+ACTION (action_new_tab)
 {
-  gtk_window_close (GTK_WINDOW (data));
+  GbkWindow *w = data;
+  add_tab (w, gbk_browser_path (active (w)), true);
+}
+
+ACTION (action_close_tab)
+{
+  GbkWindow *w = data;
+  close_tab (w, active (w));
+}
+
+ACTION (action_close_window) { gtk_window_close (GTK_WINDOW (data)); }
+
+ACTION (action_new_window)
+{
+  GbkWindow *w = data;
+  GbkWindow *n = gbk_window_new (gtk_window_get_application (GTK_WINDOW (w)), w->ctx,
+                                 gbk_browser_path (active (w)));
+  gtk_widget_show_all (GTK_WIDGET (n));
+}
+
+ACTION (action_next_tab) { gtk_notebook_next_page (((GbkWindow *) data)->tabs); }
+ACTION (action_prev_tab) { gtk_notebook_prev_page (((GbkWindow *) data)->tabs); }
+ACTION (action_location) { gbk_pathbar_edit (((GbkWindow *) data)->pathbar); }
+
+static void
+change_show_hidden (GSimpleAction *a G_GNUC_UNUSED, GVariant *state, void *data)
+{
+  set_show_hidden (data, g_variant_get_boolean (state));
+}
+
+static void
+change_sort (GSimpleAction *a G_GNUC_UNUSED, GVariant *state, void *data)
+{
+  set_sort (data, g_str_equal (g_variant_get_string (state, nullptr), "modified")
+                    ? GBK_SORT_MTIME : GBK_SORT_NAME);
 }
 
 static const GActionEntry actions[] = {
   { .name = "back", .activate = action_back },
   { .name = "forward", .activate = action_forward },
   { .name = "up", .activate = action_up },
-  { .name = "toggle-hidden", .activate = action_toggle_hidden },
   { .name = "terminal", .activate = action_terminal },
-  { .name = "close", .activate = action_close },
   { .name = "copy", .activate = action_copy },
   { .name = "cut", .activate = action_cut },
   { .name = "paste", .activate = action_paste },
   { .name = "trash", .activate = action_trash },
   { .name = "delete", .activate = action_delete },
   { .name = "rename", .activate = action_rename },
+  { .name = "new-tab", .activate = action_new_tab },
+  { .name = "close-tab", .activate = action_close_tab },
+  { .name = "close-window", .activate = action_close_window },
+  { .name = "new-window", .activate = action_new_window },
+  { .name = "next-tab", .activate = action_next_tab },
+  { .name = "prev-tab", .activate = action_prev_tab },
+  { .name = "location", .activate = action_location },
+  /* Stateful: no activate handler means a boolean toggles / a string is set. */
+  { .name = "show-hidden", .state = "false", .change_state = change_show_hidden },
+  { .name = "sort", .parameter_type = "s", .state = "'name'", .change_state = change_sort },
 };
 
-/* ---- GObject ---- */
+/* ---- keys ---- */
 
-static void
-gbk_window_dispose (GObject *o)
+static const struct
 {
-  GbkWindow *w = GBK_WINDOW (o);
-  if (w->model != nullptr)
-    set_model (w, nullptr);
-  G_OBJECT_CLASS (gbk_window_parent_class)->dispose (o);
+  const char *action;
+  const char *accels[3];
+} shortcuts[] = {
+  { "win.back", { "<Alt>Left", nullptr } },
+  { "win.forward", { "<Alt>Right", nullptr } },
+  { "win.up", { "<Alt>Up", nullptr } },
+  { "win.show-hidden", { "<Control>h", nullptr } },
+  { "win.terminal", { "F4", nullptr } },
+  { "win.close-tab", { "<Control>w", nullptr } },
+  { "win.close-window", { "<Control>q", nullptr } },
+  { "win.new-tab", { "<Control>t", nullptr } },
+  { "win.new-window", { "<Control>n", nullptr } },
+  { "win.next-tab", { "<Control>Page_Down", nullptr } },
+  { "win.prev-tab", { "<Control>Page_Up", nullptr } },
+  { "win.location", { "<Control>l", nullptr } },
+  { "win.copy", { "<Control>c", nullptr } },
+  { "win.cut", { "<Control>x", nullptr } },
+  { "win.paste", { "<Control>v", nullptr } },
+  { "win.trash", { "Delete", "KP_Delete", nullptr } },
+  { "win.delete", { "<Shift>Delete", "<Shift>KP_Delete", nullptr } },
+  { "win.rename", { "F2", nullptr } },
+};
+
+void
+gbk_window_install_accels (GtkApplication *app)
+{
+  for (size_t i = 0; i < G_N_ELEMENTS (shortcuts); i++)
+    gtk_application_set_accels_for_action (app, shortcuts[i].action, shortcuts[i].accels);
 }
+
+/* GTK runs window shortcuts before the focused widget sees a key. With a text entry focused
+ * (the location bar), that would make Delete trash the selected files and Ctrl+V paste them
+ * instead of editing the text. So while an editable has focus, keys go to it and window
+ * shortcuts don't run at all, even for keys the entry ignores (F2 must not open a rename
+ * dialog for the selected file while you type a path). Escape leaves the entry. */
+static gboolean
+gbk_window_key_press (GtkWidget *widget, GdkEventKey *ev)
+{
+  GtkWidget *focus = gtk_window_get_focus (GTK_WINDOW (widget));
+  if (focus != nullptr && GTK_IS_EDITABLE (focus))
+    {
+      gtk_window_propagate_key_event (GTK_WINDOW (widget), ev);
+      return true;
+    }
+  return GTK_WIDGET_CLASS (gbk_window_parent_class)->key_press_event (widget, ev);
+}
+
+/* ---- GObject ---- */
 
 static void
 gbk_window_finalize (GObject *o)
 {
   GbkWindow *w = GBK_WINDOW (o);
-  g_ptr_array_unref (w->back);
-  g_ptr_array_unref (w->forward);
-  g_free (w->path);
-  g_free (w->focus_on_load);
-  g_free (w->message);
   g_free (w->paste_dest);
-  g_clear_pointer (&w->pending_select, g_ptr_array_unref);
   gbk_context_unref (w->ctx);
   G_OBJECT_CLASS (gbk_window_parent_class)->finalize (o);
 }
@@ -923,15 +874,52 @@ gbk_window_finalize (GObject *o)
 static void
 gbk_window_class_init (GbkWindowClass *klass)
 {
-  G_OBJECT_CLASS (klass)->dispose = gbk_window_dispose;
   G_OBJECT_CLASS (klass)->finalize = gbk_window_finalize;
+  GTK_WIDGET_CLASS (klass)->key_press_event = gbk_window_key_press;
 }
 
 static void
-gbk_window_init (GbkWindow *w)
+gbk_window_init (GbkWindow *w G_GNUC_UNUSED)
 {
-  w->back = g_ptr_array_new_with_free_func (g_free);
-  w->forward = g_ptr_array_new_with_free_func (g_free);
+}
+
+static void
+on_pathbar_navigate (GbkPathbar *bar G_GNUC_UNUSED, const char *path, GbkWindow *w)
+{
+  GbkBrowser *b = active (w);
+  gbk_browser_open (b, path);
+  gtk_widget_grab_focus (GTK_WIDGET (gbk_browser_view (b)));
+}
+
+static GtkWidget *
+app_menu_button (void)
+{
+  g_autoptr (GMenu) menu = g_menu_new ();
+  g_autoptr (GMenu) s1 = g_menu_new ();
+  g_menu_append (s1, "New Tab", "win.new-tab");
+  g_menu_append (s1, "New Window", "win.new-window");
+  g_menu_append_section (menu, nullptr, G_MENU_MODEL (s1));
+  g_autoptr (GMenu) s2 = g_menu_new ();
+  g_menu_append (s2, "Show Hidden Files", "win.show-hidden");
+  g_menu_append (s2, "Sort by Name", "win.sort::name");
+  g_menu_append (s2, "Sort by Date Modified", "win.sort::modified");
+  g_menu_append_section (menu, nullptr, G_MENU_MODEL (s2));
+  g_autoptr (GMenu) s3 = g_menu_new ();
+  g_menu_append (s3, "Open Terminal Here", "win.terminal");
+  g_menu_append (s3, "Open Location…", "win.location");
+  g_menu_append_section (menu, nullptr, G_MENU_MODEL (s3));
+  g_autoptr (GMenu) s4 = g_menu_new ();
+  g_menu_append (s4, "Close Tab", "win.close-tab");
+  g_menu_append (s4, "Close Window", "win.close-window");
+  g_menu_append_section (menu, nullptr, G_MENU_MODEL (s4));
+
+  GtkWidget *button = gtk_menu_button_new ();
+  gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (button), G_MENU_MODEL (menu));
+  gtk_menu_button_set_use_popover (GTK_MENU_BUTTON (button), false);
+  gtk_container_add (GTK_CONTAINER (button),
+                     gtk_image_new_from_icon_name ("open-menu-symbolic", GTK_ICON_SIZE_MENU));
+  gtk_widget_set_focus_on_click (button, false);
+  return button;
 }
 
 GbkWindow *
@@ -945,13 +933,18 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   gtk_window_set_default_size (GTK_WINDOW (w), 700, 440);
 
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-  GtkWidget *scroller = gtk_scrolled_window_new (nullptr, nullptr);
-  gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroller), GTK_POLICY_AUTOMATIC,
-                                  GTK_POLICY_NEVER);
-  gtk_scrolled_window_set_shadow_type (GTK_SCROLLED_WINDOW (scroller), GTK_SHADOW_IN);
-  w->view = GBK_VIEW (gbk_view_new (ctx->types));
-  gtk_container_add (GTK_CONTAINER (scroller), GTK_WIDGET (w->view));
-  gtk_box_pack_start (GTK_BOX (box), scroller, true, true, 0);
+
+  GtkWidget *top = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+  gtk_container_set_border_width (GTK_CONTAINER (top), 4);
+  gtk_box_pack_start (GTK_BOX (top), app_menu_button (), false, false, 0);
+  w->pathbar = GBK_PATHBAR (gbk_pathbar_new ());
+  gtk_box_pack_start (GTK_BOX (top), GTK_WIDGET (w->pathbar), true, true, 0);
+  gtk_box_pack_start (GTK_BOX (box), top, false, false, 0);
+
+  w->tabs = GTK_NOTEBOOK (gtk_notebook_new ());
+  gtk_notebook_set_scrollable (w->tabs, true);
+  gtk_notebook_set_show_border (w->tabs, false);
+  gtk_box_pack_start (GTK_BOX (box), GTK_WIDGET (w->tabs), true, true, 0);
 
   w->status = GTK_LABEL (gtk_label_new (""));
   gtk_label_set_xalign (w->status, 0);
@@ -963,30 +956,55 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   gtk_box_pack_start (GTK_BOX (box), GTK_WIDGET (w->status), false, false, 0);
   gtk_container_add (GTK_CONTAINER (w), box);
 
-  gbk_connect (G_OBJECT (w), w->view, "activate", G_CALLBACK (on_activate), w);
-  gbk_connect (G_OBJECT (w), w->view, "selection-changed", G_CALLBACK (on_selection_changed), w);
-  gbk_connect (G_OBJECT (w), w->view, "search-changed", G_CALLBACK (on_selection_changed), w);
-  gbk_connect (G_OBJECT (w), w->view, "context-menu", G_CALLBACK (on_context_menu), w);
+  gbk_connect (G_OBJECT (w), w->pathbar, "navigate", G_CALLBACK (on_pathbar_navigate), w);
+  gbk_connect (G_OBJECT (w), w->tabs, "switch-page", G_CALLBACK (on_switch_page), w);
+  gbk_connect (G_OBJECT (w), w->tabs, "page-removed", G_CALLBACK (on_page_removed), w);
 
-  gbk_window_open (w, path);
-  gtk_widget_grab_focus (GTK_WIDGET (w->view));
+  set_show_hidden (w, w->show_hidden);
+  set_sort (w, w->sort);
+  add_tab (w, path, true);
+  update_chrome (w);
   return w;
+}
+
+void
+gbk_window_open (GbkWindow *w, const char *path)
+{
+  gbk_browser_open (active (w), path);
+}
+
+void
+gbk_window_new_tab (GbkWindow *w, const char *path)
+{
+  add_tab (w, path, true);
 }
 
 const char *
 gbk_window_path (GbkWindow *w)
 {
-  return w->path;
+  return gbk_browser_path (active (w));
 }
 
 GbkView *
 gbk_window_view (GbkWindow *w)
 {
-  return w->view;
+  return gbk_browser_view (active (w));
 }
 
 const char *
 gbk_window_status (GbkWindow *w)
 {
   return gtk_label_get_text (w->status);
+}
+
+int
+gbk_window_n_tabs (GbkWindow *w)
+{
+  return gtk_notebook_get_n_pages (w->tabs);
+}
+
+GbkPathbar *
+gbk_window_pathbar (GbkWindow *w)
+{
+  return w->pathbar;
 }

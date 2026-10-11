@@ -7,30 +7,10 @@ typedef struct
   char *start_path;
 } App;
 
-static const struct
-{
-  const char *action;
-  const char *accels[3];
-} accels[] = {
-  { "win.back", { "<Alt>Left", nullptr } },
-  { "win.forward", { "<Alt>Right", nullptr } },
-  { "win.up", { "<Alt>Up", nullptr } },
-  { "win.toggle-hidden", { "<Control>h", nullptr } },
-  { "win.terminal", { "F4", nullptr } },
-  { "win.close", { "<Control>w", nullptr } },
-  { "win.copy", { "<Control>c", nullptr } },
-  { "win.cut", { "<Control>x", nullptr } },
-  { "win.paste", { "<Control>v", nullptr } },
-  { "win.trash", { "Delete", "KP_Delete", nullptr } },
-  { "win.delete", { "<Shift>Delete", "<Shift>KP_Delete", nullptr } },
-  { "win.rename", { "F2", nullptr } },
-};
-
 static void
 on_activate (GtkApplication *gtk_app, App *app)
 {
-  for (size_t i = 0; i < G_N_ELEMENTS (accels); i++)
-    gtk_application_set_accels_for_action (gtk_app, accels[i].action, accels[i].accels);
+  gbk_window_install_accels (gtk_app);
 
   GbkWindow *w = gbk_window_new (gtk_app, app->ctx, app->start_path);
   gtk_widget_show_all (GTK_WIDGET (w));

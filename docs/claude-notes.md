@@ -252,11 +252,22 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   text. Non-local file:// hosts rejected. Cut-paste clears the clipboard if ours.
 - lifetime: gbk_clipboard_request(owner, cb, target, fn, data, destroy) — weak-ref owner.
   BANNED: gtk_clipboard_request_*/wait_*, gtk_dialog_run, gtk_main, g_main_loop_run.
-- window: actions copy/cut/paste/trash/delete/rename (Ctrl+C/X/V, Delete, Shift+Delete,
-  F2). Trash: no confirmation; Shift+Delete: confirm dialog. Pasted/renamed items get
-  selected as they appear (pending_select, 2s window).
-  CAUTION for the path bar: app accels (Ctrl+C/V/X, Delete, F2...) fire before a focused
-  GtkEntry gets the key — must handle when adding a text entry to the main window.
+- browser (gui): one tab = GbkBrowser (GtkBox): path, model, history, focus-on-load,
+  pending select, transient message, status text. Signals path-changed/status-changed.
+- pathbar (gui): toggle buttons from $HOME (else "File System" /), current pressed, deeper
+  buttons kept after going up (gbk_pathbar_reset on tab switch: that memory is per tab).
+  Pencil / Ctrl+L -> GtkEntry (~ and relative paths), Enter navigates, Escape returns.
+- window: GtkNotebook of browsers (tab bar hidden with one tab, like Thunar), path bar,
+  hamburger GMenu (new tab/window, show hidden, sort, terminal, location, close), status.
+  show-hidden (bool) and sort ('name'|'modified') are stateful window-wide actions.
+  Shortcut table lives in window.c: gbk_window_install_accels() — used by main AND tests
+  (tests once silently had no shortcuts at all). Ctrl+T/W/N/Q/L, Ctrl+PgUp/PgDn, F2, F4,
+  Ctrl+C/X/V, Delete, Shift+Delete, Ctrl+H, Alt+arrows.
+  KEY ROUTING: while a GtkEditable has focus, keys go to it and window shortcuts DON'T run
+  (otherwise Delete/Ctrl+V/F2 in the location bar act on files). Tested both ways.
+  Several folders activated -> new tabs. Trash: no confirmation; Shift+Delete confirms.
+- Synthetic key events in tests need hardware_keycode (GTK bindings use it); pick the
+  keymap entry with level 0/group 0.
 - Tests: test-open uses a private XDG env with a fake default app (.desktop + mimeapps.list)
   that touches marker files. Variadic nullptr terminators must be cast (C23 nullptr_t).
 - main: GtkApplication NON_UNIQUE (process per invocation), argv parsed by us.

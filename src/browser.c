@@ -1,0 +1,417 @@
+#include "browser.h"
+#include "lifetime.h"
+
+#define HISTORY_MAX 100
+#define PENDING_SELECT_MS 2000
+
+struct _GbkBrowser
+{
+  GtkBox parent_instance;
+
+  GbkContext *ctx;
+  GbkView *view;
+
+  char *path;
+  GbkDirModel *model;
+  gulong model_state_id;
+  gulong model_changed_id;
+
+  GPtrArray *back;            /* char* paths, most recent last */
+  GPtrArray *forward;
+
+  bool show_hidden;
+  GbkSortMode sort;
+  char *focus_on_load;        /* raw name to select once it appears (after going up) */
+  GPtrArray *pending_select;  /* names to select as they appear (after paste/rename) */
+  guint pending_timeout;
+  char *message;
+};
+
+G_DEFINE_FINAL_TYPE (GbkBrowser, gbk_browser, GTK_TYPE_BOX)
+
+enum { SIGNAL_PATH_CHANGED, SIGNAL_STATUS_CHANGED, N_SIGNALS };
+static guint signals[N_SIGNALS];
+
+static void
+status_changed (GbkBrowser *b)
+{
+  g_signal_emit (b, signals[SIGNAL_STATUS_CHANGED], 0);
+}
+
+/* ---- status ---- */
+
+static char *
+format_size (uint64_t bytes)
+{
+  return g_format_size_full (bytes, G_FORMAT_SIZE_IEC_UNITS);
+}
+
+char *
+gbk_browser_status (GbkBrowser *b)
+{
+  GString *s = g_string_new ("");
+  GbkDirModel *m = b->model;
+  const char *search = gbk_view_type_ahead_text (b->view);
+
+  if (b->message != nullptr)
+    g_string_append (s, b->message);
+  else if (search[0] != '\0')
+    g_string_append_printf (s, "Find: %s", search);
+  else if (m == nullptr)
+    ;
+  else if (gbk_dir_model_state (m) == GBK_DIR_ERROR)
+    g_string_append_printf (s, "Can't open: %s", g_strerror (gbk_dir_model_error (m)));
+  else
+    {
+      size_t n_sel;
+      g_autofree GbkHandle *sel = gbk_view_selected (b->view, &n_sel);
+      if (n_sel == 1)
+        {
+          const GbkEntry *e = gbk_dir_model_get (m, sel[0]);
+          g_string_append_printf (s, "\"%s\"", gbk_entry_display (e));
+          if (gbk_entry_is_dir (e))
+            g_string_append (s, " folder");
+          else if (!(e->flags & GBK_ENTRY_STAT_FAILED))
+            {
+              g_autofree char *size = format_size (e->size);
+              g_string_append_printf (s, " (%s)", size);
+            }
+        }
+      else if (n_sel > 1)
+        {
+          uint64_t total = 0;
+          for (size_t i = 0; i < n_sel; i++)
+            {
+              const GbkEntry *e = gbk_dir_model_get (m, sel[i]);
+              if (!gbk_entry_is_dir (e))
+                total += e->size;
+            }
+          g_autofree char *size = format_size (total);
+          g_string_append_printf (s, "%zu items selected (%s)", n_sel, size);
+        }
+      else
+        {
+          size_t n = gbk_dir_model_n_visible (m), dirs = 0;
+          for (size_t i = 0; i < n; i++)
+            if (gbk_entry_is_dir (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, i))))
+              dirs++;
+          size_t files = n - dirs;
+          if (dirs > 0)
+            g_string_append_printf (s, "%zu %s", dirs, dirs == 1 ? "folder" : "folders");
+          if (files > 0)
+            g_string_append_printf (s, "%s%zu %s", dirs > 0 ? ", " : "", files,
+                                    files == 1 ? "file" : "files");
+          if (n == 0)
+            g_string_append (s, gbk_dir_model_state (m) == GBK_DIR_LOADING ? "Loading…" : "Empty");
+        }
+      uint64_t free_bytes;
+      if (gbk_dir_model_free_space (m, &free_bytes))
+        {
+          g_autofree char *size = format_size (free_bytes);
+          g_string_append_printf (s, "  |  Free space: %s", size);
+        }
+    }
+  return g_string_free (s, false);
+}
+
+void
+gbk_browser_set_message (GbkBrowser *b, const char *message)
+{
+  g_free (b->message);
+  b->message = g_strdup (message);
+  status_changed (b);
+}
+
+/* ---- pending selection ---- */
+
+/* Select whichever pending names exist (they arrive via live updates, possibly in several
+ * batches). Stops once all are there, on navigation, or after a short while. */
+static void
+apply_pending_select (GbkBrowser *b)
+{
+  if (b->pending_select == nullptr || b->model == nullptr)
+    return;
+  g_autofree GbkHandle *handles = g_new (GbkHandle, MAX (b->pending_select->len, 1));
+  size_t n = 0;
+  for (guint i = 0; i < b->pending_select->len; i++)
+    {
+      GbkHandle h = gbk_dir_model_find (b->model, g_ptr_array_index (b->pending_select, i));
+      if (h != GBK_HANDLE_NONE)
+        handles[n++] = h;
+    }
+  if (n > 0)
+    gbk_view_set_selection (b->view, handles, n);
+  if (n == b->pending_select->len)
+    {
+      g_clear_pointer (&b->pending_select, g_ptr_array_unref);
+      gbk_source_cancel (&b->pending_timeout);
+    }
+}
+
+static bool
+pending_expired (void *data)
+{
+  GbkBrowser *b = data;
+  b->pending_timeout = 0;
+  g_clear_pointer (&b->pending_select, g_ptr_array_unref);
+  return false;
+}
+
+void
+gbk_browser_select_names (GbkBrowser *b, GPtrArray *names)
+{
+  g_clear_pointer (&b->pending_select, g_ptr_array_unref);
+  gbk_source_cancel (&b->pending_timeout);
+  if (names == nullptr || names->len == 0)
+    return;
+  b->pending_select = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; i < names->len; i++)
+    g_ptr_array_add (b->pending_select, g_strdup (g_ptr_array_index (names, i)));
+  b->pending_timeout = gbk_timeout_add (G_OBJECT (b), PENDING_SELECT_MS, pending_expired, b);
+  apply_pending_select (b);
+}
+
+/* ---- model & navigation ---- */
+
+static void open_path (GbkBrowser *b, const char *path, const char *focus_name);
+
+static void
+on_model_changed (GbkDirModel *m, GbkBrowser *b)
+{
+  if (m != b->model)
+    return;
+  if (b->focus_on_load != nullptr)
+    {
+      GbkHandle h = gbk_dir_model_find (m, b->focus_on_load);
+      if (h != GBK_HANDLE_NONE)
+        {
+          gbk_view_select_only (b->view, h);
+          g_clear_pointer (&b->focus_on_load, g_free);
+        }
+    }
+  apply_pending_select (b);
+  status_changed (b);
+}
+
+static void
+on_model_state (GbkDirModel *m, GbkBrowser *b)
+{
+  if (m != b->model)
+    return;
+  GbkDirState state = gbk_dir_model_state (m);
+  if (state == GBK_DIR_READY)
+    g_clear_pointer (&b->focus_on_load, g_free);   /* it never appeared: forget it */
+
+  /* The directory vanished (deleted, moved, unmounted) or never existed: walk up to the
+   * nearest ancestor. Each level is another async attempt, so nothing blocks. */
+  bool missing = state == GBK_DIR_GONE
+                 || (state == GBK_DIR_ERROR && (gbk_dir_model_error (m) == ENOENT
+                                                || gbk_dir_model_error (m) == ENOTDIR));
+  if (missing && !g_str_equal (b->path, "/"))
+    {
+      g_autofree char *parent = g_path_get_dirname (b->path);
+      g_autofree char *child = g_path_get_basename (b->path);
+      open_path (b, parent, child);
+      return;
+    }
+  status_changed (b);
+}
+
+static void
+set_model (GbkBrowser *b, GbkDirModel *m)
+{
+  if (b->model != nullptr)
+    {
+      g_signal_handler_disconnect (b->model, b->model_state_id);
+      g_signal_handler_disconnect (b->model, b->model_changed_id);
+      g_clear_object (&b->model);
+    }
+  b->model = m;     /* takes the reference */
+  if (m != nullptr)
+    {
+      gbk_dir_model_set_show_hidden (m, b->show_hidden);
+      gbk_dir_model_set_sort (m, b->sort);
+      b->model_state_id = gbk_connect (G_OBJECT (b), m, "state-changed",
+                                       G_CALLBACK (on_model_state), b);
+      b->model_changed_id = gbk_connect (G_OBJECT (b), m, "changed",
+                                         G_CALLBACK (on_model_changed), b);
+    }
+  gbk_view_set_model (b->view, m);
+}
+
+/* Replace the current directory without touching history. */
+static void
+open_path (GbkBrowser *b, const char *path, const char *focus_name)
+{
+  g_free (b->path);
+  b->path = g_canonicalize_filename (path, nullptr);
+  g_free (b->focus_on_load);
+  b->focus_on_load = g_strdup (focus_name);
+  gbk_browser_select_names (b, nullptr);
+  g_clear_pointer (&b->message, g_free);
+  set_model (b, gbk_dir_model_new (b->path, b->ctx->types));
+  g_signal_emit (b, signals[SIGNAL_PATH_CHANGED], 0);
+  status_changed (b);
+}
+
+static void
+push_history (GPtrArray *stack, const char *path)
+{
+  if (stack->len >= HISTORY_MAX)
+    g_ptr_array_remove_index (stack, 0);
+  g_ptr_array_add (stack, g_strdup (path));
+}
+
+void
+gbk_browser_open (GbkBrowser *b, const char *path)
+{
+  if (b->path != nullptr)
+    {
+      g_autofree char *canon = g_canonicalize_filename (path, nullptr);
+      if (g_str_equal (canon, b->path))
+        return;
+      push_history (b->back, b->path);
+      g_ptr_array_set_size (b->forward, 0);
+    }
+  open_path (b, path, nullptr);
+}
+
+void
+gbk_browser_back (GbkBrowser *b)
+{
+  if (b->back->len == 0)
+    return;
+  g_autofree char *target = g_ptr_array_steal_index (b->back, b->back->len - 1);
+  g_autofree char *came_from = g_path_get_basename (b->path);
+  push_history (b->forward, b->path);
+  /* If we're going back to the parent we came from, select where we were. */
+  g_autofree char *parent = g_path_get_dirname (b->path);
+  open_path (b, target, g_str_equal (parent, target) ? came_from : nullptr);
+}
+
+void
+gbk_browser_forward (GbkBrowser *b)
+{
+  if (b->forward->len == 0)
+    return;
+  g_autofree char *target = g_ptr_array_steal_index (b->forward, b->forward->len - 1);
+  push_history (b->back, b->path);
+  open_path (b, target, nullptr);
+}
+
+void
+gbk_browser_up (GbkBrowser *b)
+{
+  if (g_str_equal (b->path, "/"))
+    return;
+  g_autofree char *parent = g_path_get_dirname (b->path);
+  g_autofree char *child = g_path_get_basename (b->path);
+  push_history (b->back, b->path);
+  g_ptr_array_set_size (b->forward, 0);
+  open_path (b, parent, child);
+}
+
+const char *
+gbk_browser_path (GbkBrowser *b)
+{
+  return b->path;
+}
+
+GbkView *
+gbk_browser_view (GbkBrowser *b)
+{
+  return b->view;
+}
+
+GbkDirModel *
+gbk_browser_model (GbkBrowser *b)
+{
+  return b->model;
+}
+
+void
+gbk_browser_set_show_hidden (GbkBrowser *b, bool show)
+{
+  b->show_hidden = show;
+  if (b->model != nullptr)
+    gbk_dir_model_set_show_hidden (b->model, show);
+}
+
+void
+gbk_browser_set_sort (GbkBrowser *b, GbkSortMode sort)
+{
+  b->sort = sort;
+  if (b->model != nullptr)
+    gbk_dir_model_set_sort (b->model, sort);
+}
+
+/* ---- GObject ---- */
+
+static void
+on_view_status (GbkView *v G_GNUC_UNUSED, GbkBrowser *b)
+{
+  g_clear_pointer (&b->message, g_free);   /* a new selection replaces any message */
+  status_changed (b);
+}
+
+static void
+gbk_browser_dispose (GObject *o)
+{
+  GbkBrowser *b = GBK_BROWSER (o);
+  if (b->model != nullptr)
+    set_model (b, nullptr);
+  G_OBJECT_CLASS (gbk_browser_parent_class)->dispose (o);
+}
+
+static void
+gbk_browser_finalize (GObject *o)
+{
+  GbkBrowser *b = GBK_BROWSER (o);
+  g_ptr_array_unref (b->back);
+  g_ptr_array_unref (b->forward);
+  g_free (b->path);
+  g_free (b->focus_on_load);
+  g_free (b->message);
+  g_clear_pointer (&b->pending_select, g_ptr_array_unref);
+  gbk_context_unref (b->ctx);
+  G_OBJECT_CLASS (gbk_browser_parent_class)->finalize (o);
+}
+
+static void
+gbk_browser_class_init (GbkBrowserClass *klass)
+{
+  G_OBJECT_CLASS (klass)->dispose = gbk_browser_dispose;
+  G_OBJECT_CLASS (klass)->finalize = gbk_browser_finalize;
+  signals[SIGNAL_PATH_CHANGED] = g_signal_new ("path-changed", G_TYPE_FROM_CLASS (klass),
+                                               G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
+                                               G_TYPE_NONE, 0);
+  signals[SIGNAL_STATUS_CHANGED] = g_signal_new ("status-changed", G_TYPE_FROM_CLASS (klass),
+                                                 G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
+                                                 G_TYPE_NONE, 0);
+}
+
+static void
+gbk_browser_init (GbkBrowser *b)
+{
+  b->back = g_ptr_array_new_with_free_func (g_free);
+  b->forward = g_ptr_array_new_with_free_func (g_free);
+}
+
+GbkBrowser *
+gbk_browser_new (GbkContext *ctx, bool show_hidden, GbkSortMode sort)
+{
+  GbkBrowser *b = g_object_new (GBK_TYPE_BROWSER, "orientation", GTK_ORIENTATION_VERTICAL,
+                                nullptr);
+  b->ctx = gbk_context_ref (ctx);
+  b->show_hidden = show_hidden;
+  b->sort = sort;
+  GtkWidget *scroller = gtk_scrolled_window_new (nullptr, nullptr);
+  gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroller), GTK_POLICY_AUTOMATIC,
+                                  GTK_POLICY_NEVER);
+  b->view = GBK_VIEW (gbk_view_new (ctx->types));
+  gtk_container_add (GTK_CONTAINER (scroller), GTK_WIDGET (b->view));
+  gtk_box_pack_start (GTK_BOX (b), scroller, true, true, 0);
+  gbk_connect (G_OBJECT (b), b->view, "selection-changed", G_CALLBACK (on_view_status), b);
+  gbk_connect (G_OBJECT (b), b->view, "search-changed", G_CALLBACK (on_view_status), b);
+  return b;
+}

@@ -1,0 +1,34 @@
+/* One tab: a directory shown in a compact view, with its own history. */
+#pragma once
+
+#include "context.h"
+#include "view.h"
+
+#define GBK_TYPE_BROWSER (gbk_browser_get_type ())
+G_DECLARE_FINAL_TYPE (GbkBrowser, gbk_browser, GBK, BROWSER, GtkBox)
+
+/* Signals:
+ *   "path-changed"    the directory changed (navigation, or walking up after it vanished)
+ *   "status-changed"  the status text (gbk_browser_status) may have changed */
+
+GbkBrowser *gbk_browser_new (GbkContext *ctx, bool show_hidden, GbkSortMode sort);
+
+void gbk_browser_open (GbkBrowser *b, const char *path);    /* records history */
+void gbk_browser_back (GbkBrowser *b);
+void gbk_browser_forward (GbkBrowser *b);
+void gbk_browser_up (GbkBrowser *b);
+
+const char *gbk_browser_path (GbkBrowser *b);
+GbkView *gbk_browser_view (GbkBrowser *b);
+GbkDirModel *gbk_browser_model (GbkBrowser *b);
+
+void gbk_browser_set_show_hidden (GbkBrowser *b, bool show);
+void gbk_browser_set_sort (GbkBrowser *b, GbkSortMode sort);
+
+/* Select these names as they appear (e.g. just pasted). Gives up after a short while. */
+void gbk_browser_select_names (GbkBrowser *b, GPtrArray *names);
+
+/* A transient message shown instead of the usual status, until the selection changes. */
+void gbk_browser_set_message (GbkBrowser *b, const char *message);
+/* Status bar text. g_free. */
+char *gbk_browser_status (GbkBrowser *b);

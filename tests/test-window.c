@@ -138,9 +138,9 @@ test_navigation (void)
 
   /* Ctrl+H */
   size_t before = gbk_dir_model_n_visible (model_of (w));
-  activate (w, "toggle-hidden");
+  activate (w, "show-hidden");
   g_assert_cmpuint (gbk_dir_model_n_visible (model_of (w)), ==, before + 1);
-  activate (w, "toggle-hidden");
+  activate (w, "show-hidden");
   g_assert_cmpuint (gbk_dir_model_n_visible (model_of (w)), ==, before);
 
   gtk_widget_destroy (GTK_WIDGET (w));
@@ -474,6 +474,223 @@ test_job_outlives_window (void)
   rm_rf (root);
 }
 
+/* ---- path bar, tabs, key routing ---- */
+
+static void
+send_key_to_window (GbkWindow *w, guint keyval, GdkModifierType state)
+{
+  GdkEvent *ev = gdk_event_new (GDK_KEY_PRESS);
+  ev->key.window = g_object_ref (gtk_widget_get_window (GTK_WIDGET (w)));
+  ev->key.keyval = keyval;
+  ev->key.state = state;
+  ev->key.time = GDK_CURRENT_TIME;
+  /* Real events carry a hardware keycode, and GTK's key bindings (e.g. GtkEntry's Delete)
+   * are looked up by it: without one the event looks unhandled. */
+  GdkKeymap *keymap = gdk_keymap_get_for_display (gtk_widget_get_display (GTK_WIDGET (w)));
+  g_autofree GdkKeymapKey *keys = nullptr;
+  int n_keys = 0;
+  if (gdk_keymap_get_entries_for_keyval (keymap, keyval, &keys, &n_keys) && n_keys > 0)
+    {
+      /* A keyval can sit on several keys (Delete is also KP_Delete at another level):
+       * pick the one that produces it unshifted, as a plain keypress would. */
+      int pick = 0;
+      for (int i = 0; i < n_keys; i++)
+        if (keys[i].level == 0 && keys[i].group == 0)
+          {
+            pick = i;
+            break;
+          }
+      ev->key.hardware_keycode = (guint16) keys[pick].keycode;
+      ev->key.group = (guint8) keys[pick].group;
+    }
+  gdk_event_set_device (ev, gdk_seat_get_keyboard (
+      gdk_display_get_default_seat (gtk_widget_get_display (GTK_WIDGET (w)))));
+  gtk_main_do_event (ev);
+  gdk_event_free (ev);
+  while (gtk_events_pending ())
+    gtk_main_iteration ();
+}
+
+#define assert_bar(w, expected) \
+  do { g_autofree char *d_ = gbk_pathbar_describe (gbk_window_pathbar (w)); \
+       g_assert_cmpstr (d_, ==, expected); } while (0)
+
+static void
+test_pathbar (void)
+{
+  const char *home = g_get_home_dir ();
+  g_autofree char *home_label = g_path_get_basename (home);
+  g_autofree char *b = g_build_filename (home, "a", "b", nullptr);
+  g_autofree char *a = g_build_filename (home, "a", nullptr);
+  g_mkdir_with_parents (b, 0755);
+
+  GbkWindow *w = gbk_window_new (app, ctx, b);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, b);
+  g_autofree char *e1 = g_strdup_printf ("%s|a|[b]", home_label);
+  assert_bar (w, e1);
+
+  /* Up via a button: the deeper button stays, for going back down. */
+  gbk_pathbar_click (gbk_window_pathbar (w), a);
+  wait_at (w, a);
+  g_autofree char *e2 = g_strdup_printf ("%s|[a]|b", home_label);
+  assert_bar (w, e2);
+  gbk_pathbar_click (gbk_window_pathbar (w), b);
+  wait_at (w, b);
+  assert_bar (w, e1);
+
+  /* Outside home: from the filesystem root. */
+  gbk_window_open (w, "/usr");
+  wait_at (w, "/usr");
+  assert_bar (w, "File System|[usr]");
+
+  /* Typed location, with ~ and relative to nothing in particular. */
+  GbkPathbar *bar = gbk_window_pathbar (w);
+  gbk_pathbar_edit (bar);
+  g_assert_true (gbk_pathbar_editing (bar));
+  gtk_entry_set_text (gbk_pathbar_entry (bar), "~/a");
+  gtk_widget_activate (GTK_WIDGET (gbk_pathbar_entry (bar)));
+  wait_at (w, a);
+  g_assert_false (gbk_pathbar_editing (bar));
+
+  /* Escape leaves the entry without navigating. */
+  activate (w, "location");
+  g_assert_true (gbk_pathbar_editing (bar));
+  send_key_to_window (w, GDK_KEY_Escape, 0);
+  g_assert_false (gbk_pathbar_editing (bar));
+  g_assert_cmpstr (gbk_window_path (w), ==, a);
+
+  gtk_widget_destroy (GTK_WIDGET (w));
+  rm_rf (a);
+}
+
+static void
+test_keys_go_to_focused_entry (void)
+{
+  /* With the location entry focused, Delete / Ctrl+V / F2 must edit text, never act on
+   * files. (GTK runs window shortcuts first unless we route keys to the entry.) */
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "precious.txt", nullptr });
+  g_autofree char *precious = g_build_filename (root, "precious.txt", nullptr);
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+  select_name (w, "precious.txt");
+  activate (w, "copy");                       /* something on the clipboard to paste */
+
+  GbkPathbar *bar = gbk_window_pathbar (w);
+  gbk_pathbar_edit (bar);                     /* entry focused, whole path selected */
+  GtkEntry *entry = gbk_pathbar_entry (bar);
+  g_assert_true (gtk_window_get_focus (GTK_WINDOW (w)) == GTK_WIDGET (entry));
+  send_key_to_window (w, GDK_KEY_Delete, 0);
+  g_assert_cmpstr (gtk_entry_get_text (entry), ==, "");          /* text deleted */
+  send_key_to_window (w, GDK_KEY_v, GDK_CONTROL_MASK);
+  send_key_to_window (w, GDK_KEY_F2, 0);
+  send_key_to_window (w, GDK_KEY_Delete, GDK_SHIFT_MASK);
+  for (int i = 0; i < 200; i++)               /* give any wrongly started job time to run */
+    {
+      while (gtk_events_pending ())
+        gtk_main_iteration ();
+      g_usleep (1000);
+    }
+  g_assert_true (g_file_test (precious, G_FILE_TEST_EXISTS));
+  g_assert_cmpint (gbk_job_live (), ==, 0);
+  g_autofree char *copy = g_build_filename (root, "precious (1).txt", nullptr);
+  g_assert_false (g_file_test (copy, G_FILE_TEST_EXISTS));
+  g_autoptr (GList) tops = gtk_window_list_toplevels ();
+  for (GList *l = tops; l != nullptr; l = l->next)
+    g_assert_false (GTK_IS_DIALOG (l->data) && gtk_widget_get_visible (l->data));
+
+  /* Control: with the view focused, the same Delete key does trash the file. */
+  send_key_to_window (w, GDK_KEY_Escape, 0);
+  gtk_widget_grab_focus (GTK_WIDGET (gbk_window_view (w)));
+  select_name (w, "precious.txt");
+  send_key_to_window (w, GDK_KEY_Delete, 0);
+  g_assert_true (wait_until (path_gone, precious));
+  g_assert_true (wait_until (no_jobs, nullptr));
+
+  gtk_widget_destroy (GTK_WIDGET (w));
+  rm_rf (root);
+}
+
+static void
+test_tabs (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "one/", "two/", "three/", ".hidden", nullptr });
+  g_autofree char *one = g_build_filename (root, "one", nullptr);
+  g_autofree char *two = g_build_filename (root, "two", nullptr);
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+  g_assert_cmpint (gbk_window_n_tabs (w), ==, 1);
+
+  /* Ctrl+T: a second tab on the same folder; navigating it leaves the first alone. */
+  send_key_to_window (w, GDK_KEY_t, GDK_CONTROL_MASK);
+  g_assert_cmpint (gbk_window_n_tabs (w), ==, 2);
+  wait_at (w, root);
+  gbk_window_open (w, one);
+  wait_at (w, one);
+  send_key_to_window (w, GDK_KEY_Page_Up, GDK_CONTROL_MASK);
+  wait_at (w, root);                          /* first tab, untouched */
+  g_autofree char *bar = gbk_pathbar_describe (gbk_window_pathbar (w));
+  g_assert_null (strstr (bar, "one"));         /* path bar follows the active tab */
+  send_key_to_window (w, GDK_KEY_Page_Down, GDK_CONTROL_MASK);
+  wait_at (w, one);
+
+  /* Show hidden is window-wide: every tab. */
+  send_key_to_window (w, GDK_KEY_Page_Up, GDK_CONTROL_MASK);
+  wait_at (w, root);
+  size_t before = gbk_dir_model_n_visible (model_of (w));
+  activate (w, "show-hidden");
+  g_assert_cmpuint (gbk_dir_model_n_visible (model_of (w)), ==, before + 1);
+  activate (w, "show-hidden");
+
+  /* Activating several folders opens each in a new tab. */
+  GbkView *v = gbk_window_view (w);
+  GbkHandle hs[2] = { gbk_dir_model_find (model_of (w), "two"),
+                      gbk_dir_model_find (model_of (w), "three") };
+  gbk_view_set_selection (v, hs, 2);
+  g_signal_emit_by_name (v, "activate");
+  g_assert_cmpint (gbk_window_n_tabs (w), ==, 4);
+  wait_at (w, root);                          /* active tab unchanged */
+  gbk_view_set_selection (v, hs, 1);
+  const char *art = g_getenv ("GBK_ARTIFACTS");
+  if (art != nullptr)
+    {
+      gtk_window_resize (GTK_WINDOW (w), 640, 300);
+      for (int i = 0; i < 50; i++)
+        {
+          while (gtk_events_pending ())
+            gtk_main_iteration ();
+          g_usleep (2000);
+        }
+      gtk_container_check_resize (GTK_CONTAINER (w));
+      int ww = gtk_widget_get_allocated_width (GTK_WIDGET (w));
+      int wh = gtk_widget_get_allocated_height (GTK_WIDGET (w));
+      cairo_surface_t *surf = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, ww, wh);
+      cairo_t *cr = cairo_create (surf);
+      gtk_widget_draw (GTK_WIDGET (w), cr);
+      cairo_destroy (cr);
+      g_autofree char *png = g_build_filename (art, "window.png", nullptr);
+      cairo_surface_write_to_png (surf, png);
+      cairo_surface_destroy (surf);
+    }
+
+  /* Ctrl+W closes tabs; the last one closes the window. */
+  send_key_to_window (w, GDK_KEY_w, GDK_CONTROL_MASK);
+  g_assert_cmpint (gbk_window_n_tabs (w), ==, 3);
+  GtkWidget *alive = GTK_WIDGET (w);
+  g_object_add_weak_pointer (G_OBJECT (w), (void **) &alive);
+  for (int i = 0; i < 3 && alive != nullptr; i++)
+    send_key_to_window (w, GDK_KEY_w, GDK_CONTROL_MASK);
+  while (gtk_events_pending ())
+    gtk_main_iteration ();
+  g_assert_null (alive);
+  (void) two;
+  rm_rf (root);
+}
+
 static bool
 no_workers (void *data G_GNUC_UNUSED)
 {
@@ -486,12 +703,16 @@ main (int argc, char **argv)
   /* Private data dir: the trash goes here, never into anyone's real one. */
   g_autofree char *data_home = g_dir_make_tmp ("gbk-win-data-XXXXXX", nullptr);
   g_setenv ("XDG_DATA_HOME", data_home, true);
+  /* A private home for the path bar's "start at home" behaviour. */
+  g_autofree char *home = g_dir_make_tmp ("gbk-win-home-XXXXXX", nullptr);
+  g_setenv ("HOME", home, true);
   gtk_test_init (&argc, &argv, nullptr);
   ctx = gbk_context_new ("/nonexistent/gbk-test.conf");
   app = gtk_application_new ("net.gbk.FileTest", G_APPLICATION_NON_UNIQUE);
   g_autoptr (GError) error = nullptr;
   if (!g_application_register (G_APPLICATION (app), nullptr, &error))
     gbk_fatal ("register: %s", error->message);
+  gbk_window_install_accels (app);   /* the real bindings: tests press real keys */
 
   g_test_add_func ("/window/navigation", test_navigation);
   g_test_add_func ("/window/vanishing-directory", test_vanishing_directory);
@@ -499,6 +720,9 @@ main (int argc, char **argv)
   g_test_add_func ("/window/context-menu", test_context_menu);
   g_test_add_func ("/window/file-operations", test_file_operations);
   g_test_add_func ("/window/job-outlives-window", test_job_outlives_window);
+  g_test_add_func ("/window/pathbar", test_pathbar);
+  g_test_add_func ("/window/keys-go-to-focused-entry", test_keys_go_to_focused_entry);
+  g_test_add_func ("/window/tabs", test_tabs);
   int status = g_test_run ();
 
   while (gtk_events_pending ())
