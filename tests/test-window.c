@@ -648,6 +648,17 @@ test_tabs (void)
   send_key_to_window (w, GDK_KEY_Page_Down, GDK_CONTROL_MASK);
   wait_at (w, one);
 
+  /* Layout: the tab strip sits above the path bar, which belongs to the tab's page. */
+  GtkWidget *bar_widget = GTK_WIDGET (gbk_window_pathbar (w));
+  GtkWidget *notebook = gtk_widget_get_ancestor (bar_widget, GTK_TYPE_NOTEBOOK);
+  g_assert_nonnull (notebook);
+  int bar_y, page_y;
+  g_assert_true (gtk_widget_translate_coordinates (bar_widget, GTK_WIDGET (w), 0, 0, nullptr, &bar_y));
+  GtkWidget *page = gtk_notebook_get_nth_page (GTK_NOTEBOOK (notebook), 0);
+  GtkWidget *tab_label = gtk_notebook_get_tab_label (GTK_NOTEBOOK (notebook), page);
+  g_assert_true (gtk_widget_translate_coordinates (tab_label, GTK_WIDGET (w), 0, 0, nullptr, &page_y));
+  g_assert_cmpint (page_y, <, bar_y);
+
   /* Show hidden is window-wide: every tab. */
   send_key_to_window (w, GDK_KEY_Page_Up, GDK_CONTROL_MASK);
   wait_at (w, root);

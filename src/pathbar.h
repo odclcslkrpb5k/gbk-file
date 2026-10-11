@@ -12,8 +12,6 @@ G_DECLARE_FINAL_TYPE (GbkPathbar, gbk_pathbar, GBK, PATHBAR, GtkBox)
 
 GtkWidget *gbk_pathbar_new (void);
 void gbk_pathbar_set_path (GbkPathbar *bar, const char *path);
-/* Like set_path, but drop the remembered deeper buttons (e.g. another tab came forward). */
-void gbk_pathbar_reset (GbkPathbar *bar, const char *path);
 /* Switch to the text entry, focused, with the current path selected. */
 void gbk_pathbar_edit (GbkPathbar *bar);
 bool gbk_pathbar_editing (GbkPathbar *bar);

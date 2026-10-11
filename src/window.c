@@ -10,7 +10,6 @@ struct _GbkWindow
   GtkApplicationWindow parent_instance;
 
   GbkContext *ctx;
-  GbkPathbar *pathbar;
   GtkNotebook *tabs;
   GtkLabel *status;
   GtkLabel *modes;        /* right side of the status bar: sort and hidden-files state */
@@ -72,7 +71,6 @@ update_chrome (GbkWindow *w)
   GbkBrowser *b = active (w);
   const char *path = gbk_browser_path (b);
   set_title_path (w, path);
-  gbk_pathbar_set_path (w->pathbar, path);
   update_status (w);
 }
 
@@ -129,6 +127,7 @@ update_tabs_visible (GbkWindow *w)
 }
 
 static void on_activate (GbkView *v, GbkWindow *w);
+static GtkWidget *app_menu_button (void);
 static void on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w);
 
 static GbkBrowser *
@@ -147,6 +146,12 @@ add_tab (GbkWindow *w, const char *path, bool switch_to)
   gtk_box_pack_start (GTK_BOX (label_box), close, false, false, 0);
   gtk_widget_show_all (label_box);
   g_object_set_data (G_OBJECT (b), "gbk-tab-label", label);
+
+  /* The window's menu button leads each tab's toolbar row (so it's there with one tab and
+   * the tab strip hidden). Its actions are window actions, shared by every tab. */
+  GtkWidget *menu_button = app_menu_button ();
+  gtk_box_pack_start (gbk_browser_toolbar (b), menu_button, false, false, 0);
+  gtk_box_reorder_child (gbk_browser_toolbar (b), menu_button, 0);
 
   /* Open before joining the notebook: inserting the first page emits "switch-page", which
    * reads the tab's path. */
@@ -179,7 +184,6 @@ on_switch_page (GtkNotebook *nb G_GNUC_UNUSED, GtkWidget *page, guint n G_GNUC_U
   /* "switch-page" runs before the current page changes: use the page we're given. */
   GbkBrowser *b = GBK_BROWSER (page);
   set_title_path (w, gbk_browser_path (b));
-  gbk_pathbar_reset (w->pathbar, gbk_browser_path (b));   /* deeper buttons were per tab */
   g_autofree char *text = gbk_browser_status (b);
   gtk_label_set_text (w->status, text);
   gtk_widget_grab_focus (GTK_WIDGET (gbk_browser_view (b)));
@@ -785,7 +789,7 @@ ACTION (action_new_window)
 
 ACTION (action_next_tab) { gtk_notebook_next_page (((GbkWindow *) data)->tabs); }
 ACTION (action_prev_tab) { gtk_notebook_prev_page (((GbkWindow *) data)->tabs); }
-ACTION (action_location) { gbk_pathbar_edit (((GbkWindow *) data)->pathbar); }
+ACTION (action_location) { gbk_pathbar_edit (gbk_browser_pathbar (active (data))); }
 
 static void
 change_show_hidden (GSimpleAction *a G_GNUC_UNUSED, GVariant *state, void *data)
@@ -897,14 +901,6 @@ gbk_window_init (GbkWindow *w G_GNUC_UNUSED)
 {
 }
 
-static void
-on_pathbar_navigate (GbkPathbar *bar G_GNUC_UNUSED, const char *path, GbkWindow *w)
-{
-  GbkBrowser *b = active (w);
-  gbk_browser_open (b, path);
-  gtk_widget_grab_focus (GTK_WIDGET (gbk_browser_view (b)));
-}
-
 static GtkWidget *
 app_menu_button (void)
 {
@@ -948,13 +944,7 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
 
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
-  GtkWidget *top = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-  gtk_container_set_border_width (GTK_CONTAINER (top), 4);
-  gtk_box_pack_start (GTK_BOX (top), app_menu_button (), false, false, 0);
-  w->pathbar = GBK_PATHBAR (gbk_pathbar_new ());
-  gtk_box_pack_start (GTK_BOX (top), GTK_WIDGET (w->pathbar), true, true, 0);
-  gtk_box_pack_start (GTK_BOX (box), top, false, false, 0);
-
+  /* Tabs on top: everything below the tab strip, path bar included, belongs to the tab. */
   w->tabs = GTK_NOTEBOOK (gtk_notebook_new ());
   gtk_notebook_set_scrollable (w->tabs, true);
   gtk_notebook_set_show_border (w->tabs, false);
@@ -975,7 +965,6 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   gtk_box_pack_start (GTK_BOX (box), status_bar, false, false, 0);
   gtk_container_add (GTK_CONTAINER (w), box);
 
-  gbk_connect (G_OBJECT (w), w->pathbar, "navigate", G_CALLBACK (on_pathbar_navigate), w);
   gbk_connect (G_OBJECT (w), w->tabs, "switch-page", G_CALLBACK (on_switch_page), w);
   gbk_connect (G_OBJECT (w), w->tabs, "page-removed", G_CALLBACK (on_page_removed), w);
 
@@ -1031,5 +1020,5 @@ gbk_window_n_tabs (GbkWindow *w)
 GbkPathbar *
 gbk_window_pathbar (GbkWindow *w)
 {
-  return w->pathbar;
+  return gbk_browser_pathbar (active (w));
 }

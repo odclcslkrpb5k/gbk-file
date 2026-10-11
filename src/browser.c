@@ -9,6 +9,8 @@ struct _GbkBrowser
   GtkBox parent_instance;
 
   GbkContext *ctx;
+  GtkBox *toolbar;
+  GbkPathbar *pathbar;
   GbkView *view;
 
   char *path;
@@ -250,6 +252,7 @@ open_path (GbkBrowser *b, const char *path, const char *focus_name)
   gbk_browser_select_names (b, nullptr);
   g_clear_pointer (&b->message, g_free);
   set_model (b, gbk_dir_model_new (b->path, b->ctx->types));
+  gbk_pathbar_set_path (b->pathbar, b->path);
   g_signal_emit (b, signals[SIGNAL_PATH_CHANGED], 0);
   status_changed (b);
 }
@@ -323,6 +326,18 @@ gbk_browser_view (GbkBrowser *b)
   return b->view;
 }
 
+GbkPathbar *
+gbk_browser_pathbar (GbkBrowser *b)
+{
+  return b->pathbar;
+}
+
+GtkBox *
+gbk_browser_toolbar (GbkBrowser *b)
+{
+  return b->toolbar;
+}
+
 GbkDirModel *
 gbk_browser_model (GbkBrowser *b)
 {
@@ -352,6 +367,13 @@ on_view_status (GbkView *v G_GNUC_UNUSED, GbkBrowser *b)
 {
   g_clear_pointer (&b->message, g_free);   /* a new selection replaces any message */
   status_changed (b);
+}
+
+static void
+on_pathbar_navigate (GbkPathbar *bar G_GNUC_UNUSED, const char *path, GbkBrowser *b)
+{
+  gbk_browser_open (b, path);
+  gtk_widget_grab_focus (GTK_WIDGET (b->view));
 }
 
 static void
@@ -405,6 +427,13 @@ gbk_browser_new (GbkContext *ctx, bool show_hidden, GbkSortMode sort)
   b->ctx = gbk_context_ref (ctx);
   b->show_hidden = show_hidden;
   b->sort = sort;
+  b->toolbar = GTK_BOX (gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4));
+  gtk_container_set_border_width (GTK_CONTAINER (b->toolbar), 4);
+  b->pathbar = GBK_PATHBAR (gbk_pathbar_new ());
+  gtk_box_pack_start (b->toolbar, GTK_WIDGET (b->pathbar), true, true, 0);
+  gtk_box_pack_start (GTK_BOX (b), GTK_WIDGET (b->toolbar), false, false, 0);
+  gbk_connect (G_OBJECT (b), b->pathbar, "navigate", G_CALLBACK (on_pathbar_navigate), b);
+
   GtkWidget *scroller = gtk_scrolled_window_new (nullptr, nullptr);
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroller), GTK_POLICY_AUTOMATIC,
                                   GTK_POLICY_NEVER);

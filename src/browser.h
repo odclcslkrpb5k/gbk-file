@@ -1,7 +1,9 @@
-/* One tab: a directory shown in a compact view, with its own history. */
+/* One tab: a toolbar row (path bar), a directory shown in a compact view, and its own
+ * history. The path bar belongs to the tab: it shows this tab's folder. */
 #pragma once
 
 #include "context.h"
+#include "pathbar.h"
 #include "view.h"
 
 #define GBK_TYPE_BROWSER (gbk_browser_get_type ())
@@ -20,6 +22,9 @@ void gbk_browser_up (GbkBrowser *b);
 
 const char *gbk_browser_path (GbkBrowser *b);
 GbkView *gbk_browser_view (GbkBrowser *b);
+GbkPathbar *gbk_browser_pathbar (GbkBrowser *b);
+/* The row above the view that holds the path bar; the window adds its menu button here. */
+GtkBox *gbk_browser_toolbar (GbkBrowser *b);
 GbkDirModel *gbk_browser_model (GbkBrowser *b);
 
 void gbk_browser_set_show_hidden (GbkBrowser *b, bool show);

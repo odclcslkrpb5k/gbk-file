@@ -133,13 +133,6 @@ gbk_pathbar_set_path (GbkPathbar *bar, const char *path)
   gbk_idle_add (G_OBJECT (bar), scroll_to_current, bar);
 }
 
-void
-gbk_pathbar_reset (GbkPathbar *bar, const char *path)
-{
-  g_clear_pointer (&bar->deep, g_free);
-  gbk_pathbar_set_path (bar, path);
-}
-
 /* ---- text entry mode ---- */
 
 static void

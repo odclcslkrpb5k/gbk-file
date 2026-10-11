@@ -255,9 +255,12 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
 - browser (gui): one tab = GbkBrowser (GtkBox): path, model, history, focus-on-load,
   pending select, transient message, status text. Signals path-changed/status-changed.
 - pathbar (gui): toggle buttons from $HOME (else "File System" /), current pressed, deeper
-  buttons kept after going up (gbk_pathbar_reset on tab switch: that memory is per tab).
+  buttons kept after going up. ONE PATH BAR PER TAB, inside the browser's toolbar row
+  (user, 2026-10-11: tabs ABOVE the path bar — deliberate break from Thunar, since the path
+  bar's contents belong to the tab). The window puts its ☰ menu button at the start of each
+  tab's toolbar row.
   Pencil / Ctrl+L -> GtkEntry (~ and relative paths), Enter navigates, Escape returns.
-- window: GtkNotebook of browsers (tab bar hidden with one tab, like Thunar), path bar,
+- window: GtkNotebook of browsers at the top (tab bar hidden with one tab),
   hamburger GMenu (new tab/window, show hidden, sort, terminal, location, close), status.
   show-hidden (bool) and sort ('name'|'modified') are stateful window-wide actions.
   Shortcut table lives in window.c: gbk_window_install_accels() — used by main AND tests
