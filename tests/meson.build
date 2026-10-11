@@ -16,8 +16,8 @@ gui_test_libs = [gui_lib, core_lib, lifetime_lib]
 gui_tests = ['view', 'window']
 test_inc = [config_inc, core_inc]
 
-unit_tests = ['lifetime', 'filetype', 'natsort', 'dirmodel', 'scanner', 'command', 'config', 'menu', 'open']
-fuzz_targets = ['filetype', 'natsort', 'inotify', 'entry', 'command', 'config']
+unit_tests = ['lifetime', 'filetype', 'natsort', 'dirmodel', 'scanner', 'command', 'config', 'menu', 'open', 'fileops', 'clip', 'job']
+fuzz_targets = ['filetype', 'natsort', 'inotify', 'entry', 'command', 'config', 'clip']
 
 if not get_option('fuzzing')
   foreach name : unit_tests
