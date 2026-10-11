@@ -430,6 +430,8 @@ gbk_browser_new (GbkContext *ctx, bool show_hidden, GbkSortMode sort)
   b->toolbar = GTK_BOX (gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4));
   b->pathbar = GBK_PATHBAR (gbk_pathbar_new ());
   gtk_box_pack_start (b->toolbar, GTK_WIDGET (b->pathbar), true, true, 0);
+  /* Flush with the tab strip and window edges; a gap below separates it from the files. */
+  gtk_widget_set_margin_bottom (GTK_WIDGET (b->toolbar), 4);
   gtk_box_pack_start (GTK_BOX (b), GTK_WIDGET (b->toolbar), false, false, 0);
   gbk_connect (G_OBJECT (b), b->pathbar, "navigate", G_CALLBACK (on_pathbar_navigate), b);
 
