@@ -8,6 +8,6 @@ TryExec=@BIN@
 Exec=@BIN@ %f
 Terminal=false
 StartupNotify=true
-Categories=System;FileTools;FileManager;Utility;GTK;
+Categories=System;FileTools;FileManager;GTK;
 MimeType=inode/directory;
 Keywords=folder;files;explorer;
