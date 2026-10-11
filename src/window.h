@@ -18,5 +18,7 @@ void gbk_window_new_tab (GbkWindow *w, const char *path);
 const char *gbk_window_path (GbkWindow *w);
 GbkView *gbk_window_view (GbkWindow *w);
 const char *gbk_window_status (GbkWindow *w);
+/* Right side of the status bar: "Sort: … | Hidden files: …". */
+const char *gbk_window_modes (GbkWindow *w);
 int gbk_window_n_tabs (GbkWindow *w);
 GbkPathbar *gbk_window_pathbar (GbkWindow *w);

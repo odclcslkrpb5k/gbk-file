@@ -13,6 +13,7 @@ struct _GbkWindow
   GbkPathbar *pathbar;
   GtkNotebook *tabs;
   GtkLabel *status;
+  GtkLabel *modes;        /* right side of the status bar: sort and hidden-files state */
 
   bool show_hidden;       /* window-wide: applies to every tab */
   GbkSortMode sort;
@@ -48,15 +49,29 @@ update_status (GbkWindow *w)
   gtk_label_set_text (w->status, text);
 }
 
+/* The title is the full path of the open folder, and nothing else. */
+static void
+set_title_path (GbkWindow *w, const char *path)
+{
+  g_autofree char *shown = g_filename_display_name (path);
+  gtk_window_set_title (GTK_WINDOW (w), shown);
+}
+
+static void
+update_modes (GbkWindow *w)
+{
+  g_autofree char *text = g_strdup_printf ("Sort: %s  |  Hidden files: %s",
+                                           w->sort == GBK_SORT_MTIME ? "Date Modified" : "Name",
+                                           w->show_hidden ? "On" : "Off");
+  gtk_label_set_text (w->modes, text);
+}
+
 static void
 update_chrome (GbkWindow *w)
 {
   GbkBrowser *b = active (w);
   const char *path = gbk_browser_path (b);
-  g_autofree char *base = g_path_get_basename (path);
-  g_autofree char *shown = g_filename_display_name (base);
-  g_autofree char *title = g_strdup_printf ("%s - gbk-file", shown);
-  gtk_window_set_title (GTK_WINDOW (w), title);
+  set_title_path (w, path);
   gbk_pathbar_set_path (w->pathbar, path);
   update_status (w);
 }
@@ -163,10 +178,7 @@ on_switch_page (GtkNotebook *nb G_GNUC_UNUSED, GtkWidget *page, guint n G_GNUC_U
 {
   /* "switch-page" runs before the current page changes: use the page we're given. */
   GbkBrowser *b = GBK_BROWSER (page);
-  g_autofree char *base = g_path_get_basename (gbk_browser_path (b));
-  g_autofree char *shown = g_filename_display_name (base);
-  g_autofree char *title = g_strdup_printf ("%s - gbk-file", shown);
-  gtk_window_set_title (GTK_WINDOW (w), title);
+  set_title_path (w, gbk_browser_path (b));
   gbk_pathbar_reset (w->pathbar, gbk_browser_path (b));   /* deeper buttons were per tab */
   g_autofree char *text = gbk_browser_status (b);
   gtk_label_set_text (w->status, text);
@@ -188,6 +200,7 @@ set_show_hidden (GbkWindow *w, bool show)
     gbk_browser_set_show_hidden (GBK_BROWSER (gtk_notebook_get_nth_page (w->tabs, i)), show);
   GAction *a = g_action_map_lookup_action (G_ACTION_MAP (w), "show-hidden");
   g_simple_action_set_state (G_SIMPLE_ACTION (a), g_variant_new_boolean (show));
+  update_modes (w);
 }
 
 static void
@@ -199,6 +212,7 @@ set_sort (GbkWindow *w, GbkSortMode sort)
   GAction *a = g_action_map_lookup_action (G_ACTION_MAP (w), "sort");
   g_simple_action_set_state (G_SIMPLE_ACTION (a),
                              g_variant_new_string (sort == GBK_SORT_MTIME ? "modified" : "name"));
+  update_modes (w);
 }
 
 /* ---- opening things ---- */
@@ -946,14 +960,19 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   gtk_notebook_set_show_border (w->tabs, false);
   gtk_box_pack_start (GTK_BOX (box), GTK_WIDGET (w->tabs), true, true, 0);
 
+  GtkWidget *status_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+  gtk_widget_set_margin_start (status_bar, 6);
+  gtk_widget_set_margin_end (status_bar, 6);
+  gtk_widget_set_margin_top (status_bar, 2);
+  gtk_widget_set_margin_bottom (status_bar, 2);
   w->status = GTK_LABEL (gtk_label_new (""));
   gtk_label_set_xalign (w->status, 0);
   gtk_label_set_ellipsize (w->status, PANGO_ELLIPSIZE_END);
-  gtk_widget_set_margin_start (GTK_WIDGET (w->status), 6);
-  gtk_widget_set_margin_end (GTK_WIDGET (w->status), 6);
-  gtk_widget_set_margin_top (GTK_WIDGET (w->status), 2);
-  gtk_widget_set_margin_bottom (GTK_WIDGET (w->status), 2);
-  gtk_box_pack_start (GTK_BOX (box), GTK_WIDGET (w->status), false, false, 0);
+  w->modes = GTK_LABEL (gtk_label_new (""));
+  gtk_label_set_xalign (w->modes, 1);
+  gtk_box_pack_start (GTK_BOX (status_bar), GTK_WIDGET (w->status), true, true, 0);
+  gtk_box_pack_end (GTK_BOX (status_bar), GTK_WIDGET (w->modes), false, false, 0);
+  gtk_box_pack_start (GTK_BOX (box), status_bar, false, false, 0);
   gtk_container_add (GTK_CONTAINER (w), box);
 
   gbk_connect (G_OBJECT (w), w->pathbar, "navigate", G_CALLBACK (on_pathbar_navigate), w);
@@ -995,6 +1014,12 @@ const char *
 gbk_window_status (GbkWindow *w)
 {
   return gtk_label_get_text (w->status);
+}
+
+const char *
+gbk_window_modes (GbkWindow *w)
+{
+  return gtk_label_get_text (w->modes);
 }
 
 int

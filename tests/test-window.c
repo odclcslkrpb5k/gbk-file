@@ -125,9 +125,11 @@ test_navigation (void)
   g_assert_nonnull (strstr (gbk_window_status (w), "2 files"));
 
   /* Up: back in root with "sub" focused. */
+  g_assert_cmpstr (gtk_window_get_title (GTK_WINDOW (w)), ==, sub);
   activate (w, "up");
   wait_at (w, root);
   g_assert_cmpstr (cursor_name (w), ==, "sub");
+  g_assert_cmpstr (gtk_window_get_title (GTK_WINDOW (w)), ==, root);
 
   activate (w, "back");
   wait_at (w, sub);
@@ -136,12 +138,20 @@ test_navigation (void)
   activate (w, "forward");                      /* nothing forward: no-op */
   wait_at (w, root);
 
-  /* Ctrl+H */
+  /* The title is the full folder path, nothing else. */
+  g_assert_cmpstr (gtk_window_get_title (GTK_WINDOW (w)), ==, root);
+
+  /* Ctrl+H, reflected on the right of the status bar. */
+  g_assert_cmpstr (gbk_window_modes (w), ==, "Sort: Name  |  Hidden files: Off");
   size_t before = gbk_dir_model_n_visible (model_of (w));
   activate (w, "show-hidden");
   g_assert_cmpuint (gbk_dir_model_n_visible (model_of (w)), ==, before + 1);
+  g_assert_cmpstr (gbk_window_modes (w), ==, "Sort: Name  |  Hidden files: On");
   activate (w, "show-hidden");
   g_assert_cmpuint (gbk_dir_model_n_visible (model_of (w)), ==, before);
+  g_action_group_activate_action (G_ACTION_GROUP (w), "sort", g_variant_new_string ("modified"));
+  g_assert_cmpstr (gbk_window_modes (w), ==, "Sort: Date Modified  |  Hidden files: Off");
+  g_action_group_activate_action (G_ACTION_GROUP (w), "sort", g_variant_new_string ("name"));
 
   gtk_widget_destroy (GTK_WIDGET (w));
   rm_rf (root);

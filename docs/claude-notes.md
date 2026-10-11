@@ -266,6 +266,12 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   KEY ROUTING: while a GtkEditable has focus, keys go to it and window shortcuts DON'T run
   (otherwise Delete/Ctrl+V/F2 in the location bar act on files). Tested both ways.
   Several folders activated -> new tabs. Trash: no confirmation; Shift+Delete confirms.
+- Title bar = full path of the active folder, nothing else (user, 2026-10-11).
+- Status bar right side: "Sort: Name|Date Modified  |  Hidden files: On|Off" (user asked
+  for modes surfaced, right-aligned).
+- User decisions 2026-10-11: no far-right terminal toolbar icon; hamburger menu contents OK
+  for now; no shortcuts while the location entry has focus is correct; no middle-click
+  features; hidden/sort window-wide is right.
 - Synthetic key events in tests need hardware_keycode (GTK bindings use it); pick the
   keymap entry with level 0/group 0.
 - Tests: test-open uses a private XDG env with a fake default app (.desktop + mimeapps.list)
