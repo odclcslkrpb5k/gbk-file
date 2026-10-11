@@ -1,5 +1,6 @@
 /* Browser window: navigation, history, hidden toggle, vanished directories (under Xvfb). */
 #include "lifetime.h"
+#include "job.h"
 #include "window.h"
 
 static GtkApplication *app;
@@ -278,7 +279,8 @@ test_context_menu (void)
   GtkMenu *menu = open_context_menu (w);
   g_autofree char *labels = menu_labels (menu);
   g_assert_cmpstr (labels, ==,
-                   "Open Terminal Here|-|Sort by Name|Sort by Date Modified|-|Show Hidden Files");
+                   "Paste|-|Open Terminal Here|-|Sort by Name|Sort by Date Modified|-|"
+                   "Show Hidden Files");
   const char *first = gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0)));
   g_assert_cmpstr (first, ==, "a-old");
   choose (menu, "Sort by Date Modified");
@@ -310,6 +312,168 @@ test_context_menu (void)
   rm_rf (root);
 }
 
+/* ---- file operations through the window ---- */
+
+static bool
+no_jobs (void *data G_GNUC_UNUSED)
+{
+  return gbk_job_live () == 0;
+}
+
+static bool
+path_exists (void *data)
+{
+  return g_file_test (data, G_FILE_TEST_EXISTS);
+}
+
+static bool
+path_gone (void *data)
+{
+  return !g_file_test (data, G_FILE_TEST_EXISTS);
+}
+
+typedef struct
+{
+  GbkWindow *w;
+  const char *name;
+} SelCtx;
+
+static bool
+only_selected (void *data)
+{
+  SelCtx *c = data;
+  GbkView *v = gbk_window_view (c->w);
+  GbkHandle h = gbk_dir_model_find (model_of (c->w), c->name);
+  return h != GBK_HANDLE_NONE && gbk_view_n_selected (v) == 1 && gbk_view_is_selected (v, h);
+}
+
+/* The topmost visible dialog other than our windows (async dialogs: find, then respond). */
+static GtkDialog *
+find_dialog (void)
+{
+  for (int tries = 0; tries < 5000; tries++)
+    {
+      g_autoptr (GList) tops = gtk_window_list_toplevels ();
+      for (GList *l = tops; l != nullptr; l = l->next)
+        if (GTK_IS_DIALOG (l->data) && gtk_widget_get_visible (l->data))
+          return l->data;
+      while (gtk_events_pending ())
+        gtk_main_iteration ();
+      g_usleep (1000);
+    }
+  gbk_fatal ("no dialog appeared");
+}
+
+static void
+select_name (GbkWindow *w, const char *name)
+{
+  GbkHandle h = gbk_dir_model_find (model_of (w), name);
+  if (h == GBK_HANDLE_NONE)
+    gbk_fatal ("no %s", name);
+  gbk_view_select_only (gbk_window_view (w), h);
+}
+
+static void
+test_file_operations (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "src/", "dst/", "src/a.txt", "src/b.txt",
+                                        "dst/b.txt", nullptr });
+  g_autofree char *src = g_build_filename (root, "src", nullptr);
+  g_autofree char *dst = g_build_filename (root, "dst", nullptr);
+  GbkWindow *w = gbk_window_new (app, ctx, src);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, src);
+
+  /* Copy a.txt, go to dst, paste: it's copied and selected there. */
+  select_name (w, "a.txt");
+  activate (w, "copy");
+  gbk_window_open (w, dst);
+  wait_at (w, dst);
+  activate (w, "paste");
+  g_autofree char *dst_a = g_build_filename (dst, "a.txt", nullptr);
+  g_assert_true (wait_until (path_exists, dst_a));
+  SelCtx sel_a = { w, "a.txt" };
+  g_assert_true (wait_until (only_selected, &sel_a));
+  g_assert_true (wait_until (no_jobs, nullptr));
+
+  /* Cut b.txt from src, paste into dst where b.txt exists: answer Keep Both. */
+  activate (w, "back");
+  wait_at (w, src);
+  select_name (w, "b.txt");
+  activate (w, "cut");
+  gbk_window_open (w, dst);
+  wait_at (w, dst);
+  activate (w, "paste");
+  GtkDialog *conflict = find_dialog ();
+  gtk_dialog_response (conflict, 3 /* RESP_KEEP_BOTH */);
+  g_autofree char *kept = g_build_filename (dst, "b (1).txt", nullptr);
+  g_autofree char *src_b = g_build_filename (src, "b.txt", nullptr);
+  g_assert_true (wait_until (path_exists, kept));
+  g_assert_true (wait_until (path_gone, src_b));      /* it was a cut: moved */
+  g_assert_true (wait_until (no_jobs, nullptr));
+
+  /* F2 rename via the dialog. */
+  select_name (w, "a.txt");
+  activate (w, "rename");
+  GtkDialog *rename = find_dialog ();
+  GtkEntry *entry = g_object_get_data (G_OBJECT (rename), "gbk-entry");
+  gtk_entry_set_text (entry, "renamed.txt");
+  gtk_dialog_response (rename, GTK_RESPONSE_ACCEPT);
+  g_autofree char *renamed = g_build_filename (dst, "renamed.txt", nullptr);
+  g_assert_true (wait_until (path_exists, renamed));
+  SelCtx sel_r = { w, "renamed.txt" };
+  g_assert_true (wait_until (only_selected, &sel_r));
+
+  /* Delete key: to the trash (no confirmation). */
+  g_assert_true (wait_until (no_jobs, nullptr));
+  activate (w, "trash");
+  g_assert_true (wait_until (path_gone, renamed));
+  g_assert_true (wait_until (no_jobs, nullptr));
+
+  /* Shift+Delete: confirmation; Cancel keeps the file, Delete removes it. */
+  select_name (w, "b.txt");
+  activate (w, "delete");
+  gtk_dialog_response (find_dialog (), GTK_RESPONSE_CANCEL);
+  g_autofree char *dst_b = g_build_filename (dst, "b.txt", nullptr);
+  g_assert_true (g_file_test (dst_b, G_FILE_TEST_EXISTS));
+  activate (w, "delete");
+  gtk_dialog_response (find_dialog (), GTK_RESPONSE_ACCEPT);
+  g_assert_true (wait_until (path_gone, dst_b));
+  g_assert_true (wait_until (no_jobs, nullptr));
+
+  gtk_widget_destroy (GTK_WIDGET (w));
+  rm_rf (root);
+}
+
+static void
+test_job_outlives_window (void)
+{
+  /* Close the window while its paste is still asking a question: the job carries on with
+   * its own UI, and cancelling it there cleans up. Nothing may call into the dead window. */
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "f.txt", nullptr });
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+  select_name (w, "f.txt");
+  activate (w, "copy");
+  /* Paste where it already is: a copy... but pasting twice makes a conflict-free copy, so
+   * create the conflict explicitly by pasting into a folder holding f.txt. */
+  mkdirs (root, (const char *const[]) { "sub/", "sub/f.txt", nullptr });
+  g_autofree char *sub = g_build_filename (root, "sub", nullptr);
+  gbk_window_open (w, sub);
+  wait_at (w, sub);
+  activate (w, "paste");
+  GtkDialog *conflict = find_dialog ();
+  gtk_widget_destroy (GTK_WIDGET (w));
+  while (gtk_events_pending ())
+    gtk_main_iteration ();
+  gtk_dialog_response (conflict, GTK_RESPONSE_CANCEL);
+  g_assert_true (wait_until (no_jobs, nullptr));
+  rm_rf (root);
+}
+
 static bool
 no_workers (void *data G_GNUC_UNUSED)
 {
@@ -319,6 +483,9 @@ no_workers (void *data G_GNUC_UNUSED)
 int
 main (int argc, char **argv)
 {
+  /* Private data dir: the trash goes here, never into anyone's real one. */
+  g_autofree char *data_home = g_dir_make_tmp ("gbk-win-data-XXXXXX", nullptr);
+  g_setenv ("XDG_DATA_HOME", data_home, true);
   gtk_test_init (&argc, &argv, nullptr);
   ctx = gbk_context_new ("/nonexistent/gbk-test.conf");
   app = gtk_application_new ("net.gbk.FileTest", G_APPLICATION_NON_UNIQUE);
@@ -330,6 +497,8 @@ main (int argc, char **argv)
   g_test_add_func ("/window/vanishing-directory", test_vanishing_directory);
   g_test_add_func ("/window/terminal-missing", test_terminal_missing);
   g_test_add_func ("/window/context-menu", test_context_menu);
+  g_test_add_func ("/window/file-operations", test_file_operations);
+  g_test_add_func ("/window/job-outlives-window", test_job_outlives_window);
   int status = g_test_run ();
 
   while (gtk_events_pending ())

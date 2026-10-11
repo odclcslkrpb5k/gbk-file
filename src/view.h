@@ -27,6 +27,8 @@ GbkHandle gbk_view_cursor (GbkView *v);
 /* Moves the cursor to `h` (if visible), selects only it, scrolls it into view. */
 void gbk_view_select_only (GbkView *v, GbkHandle h);
 void gbk_view_select_all (GbkView *v);
+/* Select exactly the visible ones of `handles`; the cursor goes to the first in view order. */
+void gbk_view_set_selection (GbkView *v, const GbkHandle *handles, size_t n);
 void gbk_view_unselect_all (GbkView *v);
 size_t gbk_view_n_selected (GbkView *v);
 /* Selected handles in visible order. g_free the result. */

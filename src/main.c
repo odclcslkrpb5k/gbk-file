@@ -10,7 +10,7 @@ typedef struct
 static const struct
 {
   const char *action;
-  const char *accels[2];
+  const char *accels[3];
 } accels[] = {
   { "win.back", { "<Alt>Left", nullptr } },
   { "win.forward", { "<Alt>Right", nullptr } },
@@ -18,6 +18,12 @@ static const struct
   { "win.toggle-hidden", { "<Control>h", nullptr } },
   { "win.terminal", { "F4", nullptr } },
   { "win.close", { "<Control>w", nullptr } },
+  { "win.copy", { "<Control>c", nullptr } },
+  { "win.cut", { "<Control>x", nullptr } },
+  { "win.paste", { "<Control>v", nullptr } },
+  { "win.trash", { "Delete", "KP_Delete", nullptr } },
+  { "win.delete", { "<Shift>Delete", "<Shift>KP_Delete", nullptr } },
+  { "win.rename", { "F2", nullptr } },
 };
 
 static void

@@ -1,4 +1,6 @@
 #include "window.h"
+#include "clipboard.h"
+#include "jobui.h"
 #include "lifetime.h"
 #include "menu.h"
 #include "open.h"
@@ -24,6 +26,9 @@ struct _GbkWindow
   bool show_hidden;
   GbkSortMode sort;
   char *focus_on_load;    /* raw name to select once it appears (after going up) */
+  GPtrArray *pending_select;  /* names to select as they appear (after paste/rename) */
+  guint pending_timeout;
+  char *paste_dest;       /* destination of the paste request in flight */
   char *message;          /* transient error shown in the status bar */
 };
 
@@ -126,6 +131,53 @@ update_title (GbkWindow *w)
 
 static void open_path (GbkWindow *w, const char *path, const char *focus_name);
 
+/* Select whichever pending names exist (they arrive via live updates, possibly in several
+ * batches). Stops once all are there, on navigation, or after a short while. */
+static void
+apply_pending_select (GbkWindow *w)
+{
+  if (w->pending_select == nullptr || w->model == nullptr)
+    return;
+  g_autofree GbkHandle *handles = g_new (GbkHandle, MAX (w->pending_select->len, 1));
+  size_t n = 0;
+  for (guint i = 0; i < w->pending_select->len; i++)
+    {
+      GbkHandle h = gbk_dir_model_find (w->model, g_ptr_array_index (w->pending_select, i));
+      if (h != GBK_HANDLE_NONE)
+        handles[n++] = h;
+    }
+  if (n > 0)
+    gbk_view_set_selection (w->view, handles, n);
+  if (n == w->pending_select->len)
+    {
+      g_clear_pointer (&w->pending_select, g_ptr_array_unref);
+      gbk_source_cancel (&w->pending_timeout);
+    }
+}
+
+static bool
+pending_expired (void *data)
+{
+  GbkWindow *w = data;
+  w->pending_timeout = 0;
+  g_clear_pointer (&w->pending_select, g_ptr_array_unref);
+  return false;
+}
+
+static void
+set_pending_select (GbkWindow *w, GPtrArray *names)
+{
+  g_clear_pointer (&w->pending_select, g_ptr_array_unref);
+  gbk_source_cancel (&w->pending_timeout);
+  if (names == nullptr || names->len == 0)
+    return;
+  w->pending_select = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; i < names->len; i++)
+    g_ptr_array_add (w->pending_select, g_strdup (g_ptr_array_index (names, i)));
+  w->pending_timeout = gbk_timeout_add (G_OBJECT (w), 2000, pending_expired, w);
+  apply_pending_select (w);
+}
+
 static void
 on_model_changed (GbkDirModel *m, GbkWindow *w)
 {
@@ -140,6 +192,7 @@ on_model_changed (GbkDirModel *m, GbkWindow *w)
           g_clear_pointer (&w->focus_on_load, g_free);
         }
     }
+  apply_pending_select (w);
   update_status (w);
 }
 
@@ -197,6 +250,7 @@ open_path (GbkWindow *w, const char *path, const char *focus_name)
   w->path = g_canonicalize_filename (path, nullptr);
   g_free (w->focus_on_load);
   w->focus_on_load = g_strdup (focus_name);
+  set_pending_select (w, nullptr);
   g_clear_pointer (&w->message, g_free);
   set_model (w, gbk_dir_model_new (w->path, w->ctx->types));
   update_title (w);
@@ -345,6 +399,169 @@ on_activate (GbkView *v G_GNUC_UNUSED, GbkWindow *w)
   open_items (w, items);
 }
 
+/* ---- file operations ---- */
+
+static GPtrArray *
+paths_of (GPtrArray *items)
+{
+  GPtrArray *paths = g_ptr_array_new_with_free_func (g_free);
+  for (guint i = 0; i < items->len; i++)
+    g_ptr_array_add (paths, g_strdup (((GbkItem *) g_ptr_array_index (items, i))->path));
+  return paths;
+}
+
+static void
+on_job_finished (GbkJob *job, GError *error, GbkWindow *w)
+{
+  if (error == nullptr && g_object_get_data (G_OBJECT (job), "gbk-from-cut") != nullptr)
+    gbk_clipboard_clear_if_ours (GTK_WIDGET (w));
+  /* Select what was just created, if we're looking at where it went. */
+  if (gbk_job_dest (job) != nullptr && w->path != nullptr
+      && g_str_equal (gbk_job_dest (job), w->path))
+    set_pending_select (w, gbk_job_created (job));
+}
+
+static void
+start_job (GbkWindow *w, GbkJob *job)
+{
+  gbk_connect (G_OBJECT (w), job, "finished", G_CALLBACK (on_job_finished), w);
+  gbk_jobui_start (job, GTK_WINDOW (w));
+}
+
+static void
+copy_items (GbkWindow *w, GPtrArray *items, bool cut)
+{
+  if (items->len == 0)
+    return;
+  g_autoptr (GPtrArray) paths = paths_of (items);
+  gbk_clipboard_set_files (GTK_WIDGET (w), paths, cut);
+  g_autofree char *msg = g_strdup_printf ("%u %s %s", items->len,
+                                          items->len == 1 ? "item" : "items",
+                                          cut ? "cut" : "copied");
+  set_message (w, msg);
+}
+
+static void
+on_paste_files (GPtrArray *paths, bool cut, void *data)
+{
+  GbkWindow *w = data;
+  g_autofree char *dest = g_steal_pointer (&w->paste_dest);
+  if (paths->len == 0 || dest == nullptr)
+    {
+      set_message (w, "Nothing to paste");
+      return;
+    }
+  g_autoptr (GbkJob) job = gbk_job_new (cut ? GBK_OP_MOVE : GBK_OP_COPY, paths, dest);
+  if (cut)
+    g_object_set_data (G_OBJECT (job), "gbk-from-cut", GINT_TO_POINTER (1));
+  start_job (w, job);
+}
+
+static void
+paste_into (GbkWindow *w, const char *dest)
+{
+  g_free (w->paste_dest);
+  w->paste_dest = g_strdup (dest);
+  gbk_clipboard_get_files (G_OBJECT (w), GTK_WIDGET (w), on_paste_files, w);
+}
+
+static void
+trash_items (GbkWindow *w, GPtrArray *items)
+{
+  if (items->len == 0)
+    return;
+  g_autoptr (GPtrArray) paths = paths_of (items);
+  g_autoptr (GbkJob) job = gbk_job_new (GBK_OP_TRASH, paths, nullptr);
+  start_job (w, job);
+}
+
+static void
+on_delete_response (GtkDialog *d, int response, GbkWindow *w)
+{
+  if (response == GTK_RESPONSE_ACCEPT)
+    {
+      GPtrArray *paths = g_object_get_data (G_OBJECT (d), "gbk-paths");
+      g_autoptr (GbkJob) job = gbk_job_new (GBK_OP_DELETE, paths, nullptr);
+      start_job (w, job);
+    }
+  gtk_widget_destroy (GTK_WIDGET (d));
+}
+
+static void
+delete_items (GbkWindow *w, GPtrArray *items)
+{
+  if (items->len == 0)
+    return;
+  const GbkItem *first = g_ptr_array_index (items, 0);
+  GtkWidget *d = items->len == 1
+    ? gtk_message_dialog_new (GTK_WINDOW (w), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                              GTK_MESSAGE_WARNING, GTK_BUTTONS_NONE,
+                              "Permanently delete “%s”?", first->display)
+    : gtk_message_dialog_new (GTK_WINDOW (w), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                              GTK_MESSAGE_WARNING, GTK_BUTTONS_NONE,
+                              "Permanently delete %u items?", items->len);
+  gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (d),
+                                            "This can't be undone. They won't go to the trash.");
+  gtk_dialog_add_buttons (GTK_DIALOG (d), "_Cancel", GTK_RESPONSE_CANCEL, "_Delete",
+                          GTK_RESPONSE_ACCEPT, nullptr);
+  gtk_dialog_set_default_response (GTK_DIALOG (d), GTK_RESPONSE_CANCEL);
+  g_object_set_data_full (G_OBJECT (d), "gbk-paths", paths_of (items),
+                          (GDestroyNotify) g_ptr_array_unref);
+  gbk_connect (G_OBJECT (w), d, "response", G_CALLBACK (on_delete_response), w);
+  gtk_widget_show_all (d);
+}
+
+static void
+on_rename_response (GtkDialog *d, int response, GbkWindow *w)
+{
+  if (response == GTK_RESPONSE_ACCEPT)
+    {
+      const char *path = g_object_get_data (G_OBJECT (d), "gbk-path");
+      GtkEntry *entry = g_object_get_data (G_OBJECT (d), "gbk-entry");
+      /* The entry holds UTF-8; filenames are bytes in the filesystem encoding. */
+      g_autoptr (GError) error = nullptr;
+      g_autofree char *name = g_filename_from_utf8 (gtk_entry_get_text (entry), -1, nullptr,
+                                                    nullptr, &error);
+      if (name == nullptr)
+        gbk_jobui_error (GTK_WINDOW (w), "Can't rename", error->message);
+      else if (!gbk_ops_valid_name (name, &error))
+        gbk_jobui_error (GTK_WINDOW (w), "Can't rename", error->message);
+      else
+        {
+          g_autoptr (GbkJob) job = gbk_job_new_rename (path, name);
+          start_job (w, job);
+        }
+    }
+  gtk_widget_destroy (GTK_WIDGET (d));
+}
+
+static void
+rename_item (GbkWindow *w, const GbkItem *it)
+{
+  GtkWidget *d = gtk_dialog_new_with_buttons ("Rename", GTK_WINDOW (w),
+                                              GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                              "_Cancel", GTK_RESPONSE_CANCEL,
+                                              "_Rename", GTK_RESPONSE_ACCEPT, nullptr);
+  gtk_dialog_set_default_response (GTK_DIALOG (d), GTK_RESPONSE_ACCEPT);
+  GtkWidget *entry = gtk_entry_new ();
+  g_autofree char *base = g_path_get_basename (it->path);
+  g_autofree char *shown = g_filename_display_name (base);
+  gtk_entry_set_text (GTK_ENTRY (entry), shown);
+  gtk_entry_set_activates_default (GTK_ENTRY (entry), true);
+  gtk_entry_set_width_chars (GTK_ENTRY (entry), (int) MIN (60, MAX (30, g_utf8_strlen (shown, -1) + 5)));
+  GtkWidget *area = gtk_dialog_get_content_area (GTK_DIALOG (d));
+  gtk_container_set_border_width (GTK_CONTAINER (area), 8);
+  gtk_box_pack_start (GTK_BOX (area), entry, true, true, 0);
+  g_object_set_data_full (G_OBJECT (d), "gbk-path", g_strdup (it->path), g_free);
+  g_object_set_data (G_OBJECT (d), "gbk-entry", entry);
+  gbk_connect (G_OBJECT (w), d, "response", G_CALLBACK (on_rename_response), w);
+  gtk_widget_show_all (d);
+  /* Select the name without its extension, so typing replaces just that. */
+  const char *dot = it->is_dir ? nullptr : strrchr (shown, '.');
+  int end = (dot != nullptr && dot != shown) ? (int) g_utf8_pointer_to_offset (shown, dot) : -1;
+  gtk_editable_select_region (GTK_EDITABLE (entry), 0, end);
+}
+
 /* ---- context menu ---- */
 
 /* Each menu item carries its entry kind, plus an action or app; the menu carries the item
@@ -420,6 +637,13 @@ on_menu_item (GtkMenuItem *mi, GbkWindow *w)
     case GBK_MENU_SHOW_HIDDEN:
       g_action_group_activate_action (G_ACTION_GROUP (w), "toggle-hidden", nullptr);
       break;
+    case GBK_MENU_CUT: copy_items (w, items, true); break;
+    case GBK_MENU_COPY: copy_items (w, items, false); break;
+    case GBK_MENU_PASTE: paste_into (w, w->path); break;
+    case GBK_MENU_PASTE_INTO: paste_into (w, first->path); break;
+    case GBK_MENU_TRASH: trash_items (w, items); break;
+    case GBK_MENU_DELETE: delete_items (w, items); break;
+    case GBK_MENU_RENAME: rename_item (w, first); break;
     case GBK_MENU_SEPARATOR:
     default:
       gbk_fatal ("bad menu entry kind %d", (int) kind);
@@ -532,6 +756,13 @@ on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
         case GBK_MENU_SHOW_HIDDEN:
           check_item (w, menu, "Show Hidden Files", e->kind, w->show_hidden, false);
           break;
+        case GBK_MENU_CUT: menu_item (w, menu, "Cut", e->kind); break;
+        case GBK_MENU_COPY: menu_item (w, menu, "Copy", e->kind); break;
+        case GBK_MENU_PASTE: menu_item (w, menu, "Paste", e->kind); break;
+        case GBK_MENU_PASTE_INTO: menu_item (w, menu, "Paste Into Folder", e->kind); break;
+        case GBK_MENU_TRASH: menu_item (w, menu, "Move to Trash", e->kind); break;
+        case GBK_MENU_DELETE: menu_item (w, menu, "Delete", e->kind); break;
+        case GBK_MENU_RENAME: menu_item (w, menu, "Rename…", e->kind); break;
         default:
           gbk_fatal ("bad menu entry kind %d", (int) e->kind);
         }
@@ -600,6 +831,49 @@ action_terminal (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void
 }
 
 static void
+action_copy (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+{
+  g_autoptr (GPtrArray) items = snapshot_selection (data);
+  copy_items (data, items, false);
+}
+
+static void
+action_cut (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+{
+  g_autoptr (GPtrArray) items = snapshot_selection (data);
+  copy_items (data, items, true);
+}
+
+static void
+action_paste (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+{
+  GbkWindow *w = data;
+  paste_into (w, w->path);
+}
+
+static void
+action_trash (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+{
+  g_autoptr (GPtrArray) items = snapshot_selection (data);
+  trash_items (data, items);
+}
+
+static void
+action_delete (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+{
+  g_autoptr (GPtrArray) items = snapshot_selection (data);
+  delete_items (data, items);
+}
+
+static void
+action_rename (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
+{
+  g_autoptr (GPtrArray) items = snapshot_selection (data);
+  if (items->len == 1)
+    rename_item (data, g_ptr_array_index (items, 0));
+}
+
+static void
 action_close (GSimpleAction *a G_GNUC_UNUSED, GVariant *p G_GNUC_UNUSED, void *data)
 {
   gtk_window_close (GTK_WINDOW (data));
@@ -612,6 +886,12 @@ static const GActionEntry actions[] = {
   { .name = "toggle-hidden", .activate = action_toggle_hidden },
   { .name = "terminal", .activate = action_terminal },
   { .name = "close", .activate = action_close },
+  { .name = "copy", .activate = action_copy },
+  { .name = "cut", .activate = action_cut },
+  { .name = "paste", .activate = action_paste },
+  { .name = "trash", .activate = action_trash },
+  { .name = "delete", .activate = action_delete },
+  { .name = "rename", .activate = action_rename },
 };
 
 /* ---- GObject ---- */
@@ -634,6 +914,8 @@ gbk_window_finalize (GObject *o)
   g_free (w->path);
   g_free (w->focus_on_load);
   g_free (w->message);
+  g_free (w->paste_dest);
+  g_clear_pointer (&w->pending_select, g_ptr_array_unref);
   gbk_context_unref (w->ctx);
   G_OBJECT_CLASS (gbk_window_parent_class)->finalize (o);
 }

@@ -51,6 +51,17 @@
  * finish by returning from their function. (Also why -fexceptions buys us nothing.) --- */
 #pragma GCC poison pthread_cancel pthread_exit g_thread_exit
 
+/* --- Nested main loops. Code running inside one (dialog callbacks, model updates, window
+ * destruction...) can pull the world out from under the caller: reentrancy crashes. Use
+ * asynchronous "response" handlers instead. The clipboard's wait_* functions spin one too. */
+#pragma GCC poison gtk_dialog_run gtk_main g_main_loop_run
+#pragma GCC poison gtk_clipboard_wait_for_contents gtk_clipboard_wait_for_text
+#pragma GCC poison gtk_clipboard_wait_for_uris gtk_clipboard_wait_for_targets
+#pragma GCC poison gtk_clipboard_wait_for_image gtk_clipboard_wait_for_rich_text
+#pragma GCC poison gtk_clipboard_wait_is_text_available gtk_clipboard_wait_is_uris_available
+#pragma GCC poison gtk_clipboard_wait_is_target_available gtk_clipboard_wait_is_image_available
+#pragma GCC poison gtk_clipboard_wait_is_rich_text_available
+
 /* --- g_error: use gbk_fatal (fatal.h). --- */
 #undef g_error
 #pragma GCC poison g_error
@@ -83,6 +94,9 @@
 #pragma GCC poison g_source_attach g_source_set_callback g_source_set_closure
 #pragma GCC poison g_unix_fd_add g_unix_fd_add_full g_unix_signal_add g_unix_signal_add_full
 #pragma GCC poison g_io_add_watch g_io_add_watch_full g_child_watch_add g_child_watch_add_full
+#pragma GCC poison gtk_clipboard_request_contents gtk_clipboard_request_text
+#pragma GCC poison gtk_clipboard_request_rich_text gtk_clipboard_request_image
+#pragma GCC poison gtk_clipboard_request_uris gtk_clipboard_request_targets
 #pragma GCC poison gdk_threads_add_idle gdk_threads_add_idle_full
 #pragma GCC poison gdk_threads_add_timeout gdk_threads_add_timeout_full
 #pragma GCC poison gdk_threads_add_timeout_seconds gdk_threads_add_timeout_seconds_full

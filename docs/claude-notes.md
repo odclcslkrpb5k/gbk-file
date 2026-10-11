@@ -240,10 +240,27 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   is destroyed (GtkMenu is a toplevel: attach-widget destroy does NOT destroy it — leaked
   once, caught by the lifetime counter). Keyboard popups use gtk_get_current_event() as the
   trigger (GTK requires one).
+- fileops (core, blocking, worker-only): see header for safety rules (temp+fsync+rename
+  replace, O_EXCL/RENAME_NOREPLACE, dirfd/O_NOFOLLOW delete, into-itself guard, depth cap
+  GBK_OPS_MAX_DEPTH, EXDEV move deletes source only after a complete copy, folder REPLACE
+  = merge, paste where it came from = automatic "name (1).ext").
+- job (core): GObject; worker thread + queue/eventfd; questions block the worker on a GCond
+  until gbk_job_answer/cancel. Running job holds a self-ref (outlives windows).
+- jobui (gui): progress window after 500ms, async question dialogs (Cancel/Skip/Keep
+  Both/Replace|Merge + Apply to all; untrashable -> Delete Permanently), error dialog.
+- clipboard (gui) + cliptext (core, fuzzed): x-special/gnome-copied-files, text/uri-list,
+  text. Non-local file:// hosts rejected. Cut-paste clears the clipboard if ours.
+- lifetime: gbk_clipboard_request(owner, cb, target, fn, data, destroy) — weak-ref owner.
+  BANNED: gtk_clipboard_request_*/wait_*, gtk_dialog_run, gtk_main, g_main_loop_run.
+- window: actions copy/cut/paste/trash/delete/rename (Ctrl+C/X/V, Delete, Shift+Delete,
+  F2). Trash: no confirmation; Shift+Delete: confirm dialog. Pasted/renamed items get
+  selected as they appear (pending_select, 2s window).
+  CAUTION for the path bar: app accels (Ctrl+C/V/X, Delete, F2...) fire before a focused
+  GtkEntry gets the key — must handle when adding a text entry to the main window.
 - Tests: test-open uses a private XDG env with a fake default app (.desktop + mimeapps.list)
   that touches marker files. Variadic nullptr terminators must be cast (C23 nullptr_t).
 - main: GtkApplication NON_UNIQUE (process per invocation), argv parsed by us.
 
-Not built yet: GUI pieces (path bar, tabs)
+Not built yet: path bar, tabs
 (spawn, default handler via GAppInfo, script/terminal logic), clipboard, file operations
 (copy/move/trash/delete/rename with conflict dialog), type-ahead, keybindings.

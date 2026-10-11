@@ -33,6 +33,13 @@ guint gbk_timeout_add(GObject *owner, guint interval_ms, GbkSourceFunc fn, void 
  * in finalize is always safe. */
 guint gbk_fd_watch(GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn, void *data);
 
+/* Request clipboard contents for `target`. `fn` runs only if `owner` is still alive when
+ * the (asynchronous) answer arrives. `destroy` (may be nullptr) is always called on `data`
+ * afterwards, whether or not `fn` ran. `sd` may hold no data (empty / unsupported). */
+typedef void (*GbkClipboardFunc) (GtkSelectionData *sd, void *data);
+void gbk_clipboard_request (GObject *owner, GtkClipboard *clipboard, GdkAtom target,
+                            GbkClipboardFunc fn, void *data, GDestroyNotify destroy);
+
 /* Cancel a source early and zero `*id`. Safe if the source already finished or `*id` is 0. */
 void gbk_source_cancel(guint *id);
 

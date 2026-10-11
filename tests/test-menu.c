@@ -24,7 +24,9 @@ describe (GPtrArray *items, bool background)
     [GBK_MENU_EXECUTE] = "exec", [GBK_MENU_EXECUTE_TERMINAL] = "exec-term",
     [GBK_MENU_TERMINAL_HERE] = "term-here", [GBK_MENU_ACTION] = "action",
     [GBK_MENU_SORT_NAME] = "sort-name", [GBK_MENU_SORT_MTIME] = "sort-mtime",
-    [GBK_MENU_SHOW_HIDDEN] = "hidden",
+    [GBK_MENU_SHOW_HIDDEN] = "hidden", [GBK_MENU_CUT] = "cut", [GBK_MENU_COPY] = "copy",
+    [GBK_MENU_PASTE] = "paste", [GBK_MENU_PASTE_INTO] = "paste-into", [GBK_MENU_TRASH] = "trash",
+    [GBK_MENU_DELETE] = "delete", [GBK_MENU_RENAME] = "rename",
   };
   g_autoptr (GArray) entries = gbk_menu_entries (config, items, background);
   GString *s = g_string_new ("");
@@ -61,26 +63,26 @@ static void
 test_menus (void)
 {
   assert_menu (items_of (item ("/d/a.zip", "application/zip", false, false, false), (GbkItem *) nullptr), false,
-               "open with | action:extract action:compress");
+               "open with | cut copy | trash delete rename | action:extract action:compress");
   assert_menu (items_of (item ("/d/go.sh", "application/x-shellscript", false, true, true), (GbkItem *) nullptr),
-               false, "open with exec exec-term | action:compress");
+               false, "open with exec exec-term | cut copy | trash delete rename | action:compress");
   assert_menu (items_of (item ("/d/go.sh", "application/x-shellscript", false, false, true), (GbkItem *) nullptr),
-               false, "open with exec exec-term | action:compress");
+               false, "open with exec exec-term | cut copy | trash delete rename | action:compress");
   assert_menu (items_of (item ("/d/prog", "application/x-executable", false, true, false), (GbkItem *) nullptr),
-               false, "open with exec exec-term | action:compress");
+               false, "open with exec exec-term | cut copy | trash delete rename | action:compress");
   assert_menu (items_of (item ("/d/sub", "inode/directory", true, false, false), (GbkItem *) nullptr), false,
-               "open term-here | action:compress");
+               "open term-here | cut copy paste-into | trash delete rename | action:compress");
   /* Two zips: same type, extract applies to both; no Execute for multiple. */
   assert_menu (items_of (item ("/d/a.zip", "application/zip", false, false, false),
                          item ("/d/b.zip", "application/zip", false, false, false), (GbkItem *) nullptr),
-               false, "open with | action:extract action:compress");
+               false, "open with | cut copy | trash delete | action:extract action:compress");
   /* Mixed: no Open With, and extract doesn't apply to the text file. */
   assert_menu (items_of (item ("/d/a.zip", "application/zip", false, false, false),
                          item ("/d/t.txt", "text/plain", false, false, false), (GbkItem *) nullptr),
-               false, "open | action:compress");
+               false, "open | cut copy | trash delete | action:compress");
   /* Background: the current directory. */
   assert_menu (items_of (item ("/d", "inode/directory", true, false, false), (GbkItem *) nullptr), true,
-               "term-here | action:compress | sort-name sort-mtime | hidden");
+               "paste | term-here | action:compress | sort-name sort-mtime | hidden");
 }
 
 static void
@@ -89,9 +91,9 @@ test_no_actions_no_dangling_separator (void)
   gbk_config_free (config);
   config = gbk_config_new_default ();
   assert_menu (items_of (item ("/d/t.txt", "text/plain", false, false, false), (GbkItem *) nullptr), false,
-               "open with");
+               "open with | cut copy | trash delete rename");
   assert_menu (items_of (item ("/d", "inode/directory", true, false, false), (GbkItem *) nullptr), true,
-               "term-here | sort-name sort-mtime | hidden");
+               "paste | term-here | sort-name sort-mtime | hidden");
 }
 
 int

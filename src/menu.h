@@ -19,6 +19,13 @@ typedef enum
   GBK_MENU_EXECUTE_TERMINAL,
   GBK_MENU_TERMINAL_HERE,
   GBK_MENU_ACTION,             /* `action` */
+  GBK_MENU_CUT,
+  GBK_MENU_COPY,
+  GBK_MENU_PASTE,              /* into the current directory (background menu) */
+  GBK_MENU_PASTE_INTO,         /* into the one selected folder */
+  GBK_MENU_TRASH,
+  GBK_MENU_DELETE,
+  GBK_MENU_RENAME,
   GBK_MENU_SORT_NAME,
   GBK_MENU_SORT_MTIME,
   GBK_MENU_SHOW_HIDDEN,

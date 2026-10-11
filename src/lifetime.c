@@ -161,6 +161,49 @@ gbk_fd_watch (GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn, void
   return add_source (owner, g_unix_fd_source_new (fd, condition), nullptr, fn, data);
 }
 
+/* ---- Clipboard requests ----
+ * GTK always calls the callback eventually (with empty data on failure), but possibly after
+ * the requester is gone. A weak ref decides whether `fn` may run. */
+
+typedef struct
+{
+  GWeakRef owner;
+  GbkClipboardFunc fn;
+  void *data;
+  GDestroyNotify destroy;
+} ClipReq;
+
+static void
+clipboard_received (GtkClipboard *clipboard G_GNUC_UNUSED, GtkSelectionData *sd, void *p)
+{
+  ClipReq *r = p;
+  GObject *owner = g_weak_ref_get (&r->owner);
+  if (owner != nullptr)
+    {
+      r->fn (sd, r->data);
+      g_object_unref (owner);
+    }
+  if (r->destroy != nullptr)
+    r->destroy (r->data);
+  g_weak_ref_clear (&r->owner);
+  g_free (r);
+  g_atomic_int_dec_and_test (&live_count);
+}
+
+void
+gbk_clipboard_request (GObject *owner, GtkClipboard *clipboard, GdkAtom target,
+                       GbkClipboardFunc fn, void *data, GDestroyNotify destroy)
+{
+  g_assert (G_IS_OBJECT (owner) && fn != nullptr);
+  ClipReq *r = g_new0 (ClipReq, 1);
+  g_weak_ref_init (&r->owner, owner);
+  r->fn = fn;
+  r->data = data;
+  r->destroy = destroy;
+  g_atomic_int_inc (&live_count);
+  gtk_clipboard_request_contents (clipboard, target, clipboard_received, r);
+}
+
 void
 gbk_source_cancel (guint *id)
 {

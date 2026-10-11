@@ -380,6 +380,29 @@ gbk_view_select_only (GbkView *v, GbkHandle h)
 }
 
 void
+gbk_view_set_selection (GbkView *v, const GbkHandle *handles, size_t n)
+{
+  g_hash_table_remove_all (v->selected);
+  size_t first = SIZE_MAX;
+  for (size_t i = 0; i < n; i++)
+    {
+      size_t at = index_of (v, handles[i]);
+      if (at == SIZE_MAX)
+        continue;
+      g_hash_table_add (v->selected, key_of (handles[i]));
+      first = MIN (first, at);
+    }
+  if (first != SIZE_MAX)
+    {
+      GbkHandle h = handle_at_index (v, first);
+      set_cursor (v, h);
+      v->anchor = h;
+      scroll_to_index (v, first);
+    }
+  emit_selection_changed (v);
+}
+
+void
 gbk_view_select_all (GbkView *v)
 {
   size_t n = n_items (v);
