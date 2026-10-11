@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=gbk-file
+GenericName=File Manager
+Comment=Browse the file system
+Icon=system-file-manager
+TryExec=@BIN@
+Exec=@BIN@ %f
+Terminal=false
+StartupNotify=true
+Categories=System;FileTools;FileManager;Utility;GTK;
+MimeType=inode/directory;
+Keywords=folder;files;explorer;

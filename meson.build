@@ -1,4 +1,7 @@
 project('gbk-file', 'c',
+  # The git hash, written by tools/in-container.sh before every setup. One source of truth:
+  # meson's summary, --version and the binary all read it.
+  version : files('out/VERSION'),
   meson_version : '>= 1.3',
   default_options : [
     'c_std=gnu23',
@@ -97,7 +100,7 @@ else
 endif
 
 conf = configuration_data()
-conf.set_quoted('GBK_VERSION', get_option('build_id'))
+conf.set_quoted('GBK_VERSION', meson.project_version())
 configure_file(output : 'gbk-config.h', configuration : conf)
 config_inc = include_directories('.')
 

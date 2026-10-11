@@ -7,6 +7,9 @@
 #   ./build bench     scan/sort/memory benchmark (release build, real filesystem)
 #   ./build release   debug + analyze + 20s fuzz must pass, then hardened build + tests.
 #                     Refuses a dirty tree so the embedded git hash identifies the source.
+#   ./build install [prefix]
+#                     install the release binary + .desktop file (default prefix ~/.local);
+#                     runs `release` first unless it already passed for this exact commit.
 #   ./build shell     interactive shell in the build image
 #   ./build image     (re)build the build image
 set -euo pipefail
@@ -22,10 +25,53 @@ build_image() {
   docker build -t "$tag" - < "$root/Dockerfile"
 }
 
+# Runs on the host: the only command that writes outside the repo.
+install_release() {
+  local prefix=${1:-$HOME/.local}
+  # Goes verbatim into the .desktop Exec line and sed; allow only characters that need no
+  # quoting in either.
+  if [[ $prefix != /* || $prefix =~ [^A-Za-z0-9/._+-] ]]; then
+    echo "install: prefix must be an absolute path of [A-Za-z0-9/._+-]: $prefix" >&2
+    exit 2
+  fi
+  if [[ -n $(git -C "$root" status --porcelain) ]]; then
+    echo "install: working tree is dirty; commit first so the installed hash means something." >&2
+    exit 1
+  fi
+  local hash bin=$root/out/release/src/gbk-file stamp=$root/out/release/released
+  hash=$(git -C "$root" rev-parse --short=12 HEAD)
+  if [[ ! -f $stamp || $(<"$stamp") != "$hash" ]]; then
+    echo "install: no passing release for $hash yet; running ./build release" >&2
+    "$0" release
+  fi
+  # Belt and braces: the binary itself must say it is this commit.
+  if [[ $("$bin" --version) != "gbk-file $hash" ]]; then
+    echo "install: $bin reports '$("$bin" --version)', expected 'gbk-file $hash'" >&2
+    exit 1
+  fi
+
+  local bindir=$prefix/bin appdir=$prefix/share/applications
+  mkdir -p "$bindir" "$appdir"
+  # Copy beside the target, then rename over it: atomic, and running instances keep the
+  # old inode instead of seeing a half-written or truncated binary.
+  cp "$bin" "$bindir/.gbk-file.new"
+  chmod 755 "$bindir/.gbk-file.new"
+  mv -f "$bindir/.gbk-file.new" "$bindir/gbk-file"
+  sed "s|@BIN@|$bindir/gbk-file|g" "$root/data/gbk-file.desktop.in" > "$appdir/.gbk-file.desktop.new"
+  mv -f "$appdir/.gbk-file.desktop.new" "$appdir/gbk-file.desktop"
+
+  echo "installed gbk-file $hash"
+  echo "  $bindir/gbk-file"
+  echo "  $appdir/gbk-file.desktop"
+  echo "To make it the default for folders:"
+  echo "  xdg-mime default gbk-file.desktop inode/directory"
+}
+
 case "$cmd" in
   debug|analyze|release|shell|fuzz|bench) ;;
+  install) install_release "${2:-}"; exit 0 ;;
   image) build_image; exit 0 ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 
 docker image inspect "$tag" >/dev/null 2>&1 || build_image

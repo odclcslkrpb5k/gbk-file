@@ -281,6 +281,14 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   that touches marker files. Variadic nullptr terminators must be cast (C23 nullptr_t).
 - main: GtkApplication NON_UNIQUE (process per invocation), argv parsed by us.
 
-Not built yet: path bar, tabs
-(spawn, default handler via GAppInfo, script/terminal logic), clipboard, file operations
-(copy/move/trash/delete/rename with conflict dialog), type-ahead, keybindings.
+- Version: tools/in-container.sh writes $GBK_VERSION (git hash, "-dirty" suffix) to
+  out/VERSION before every setup; meson.build reads it via project(version: files(...)),
+  GBK_VERSION = meson.project_version(). (Was a separate build_id option -> meson summary
+  printed "gbk-file undefined"; user spotted it.)
+- ./build install [prefix] (HOST side, default ~/.local — the one command writing outside
+  the repo; only the USER runs it with the default prefix; I test with a prefix under out/).
+  Refuses dirty tree; needs out/release/released == HEAD hash (written only after the full
+  release gate passes; setup() deletes it on any rebuild, e.g. bench), else runs release.
+  Checks binary --version == HEAD, then cp+rename (atomic) binary and data/gbk-file.desktop.in.
+- Not built yet (proposed 2026-10-11): New Folder/New File, rubber-band selection, drag and
+  drop (ask user if they use it), remember window size, parallel statx.

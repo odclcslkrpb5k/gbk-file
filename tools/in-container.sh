@@ -5,10 +5,13 @@ cd /src
 
 setup() {  # setup <dir> <meson options...>
   local dir=$1; shift
+  mkdir -p out
+  printf '%s\n' "$GBK_VERSION" > out/VERSION    # meson.build reads it as the project version
+  rm -f "$dir/released"    # any rebuild voids the release stamp until the gate passes again
   if [[ -d $dir/meson-private ]]; then
-    meson setup --reconfigure "$dir" -Dbuild_id="$GBK_VERSION" "$@" | tail -n 25
+    meson setup --reconfigure "$dir" "$@" | tail -n 25
   else
-    meson setup "$dir" -Dbuild_id="$GBK_VERSION" "$@" | tail -n 25
+    meson setup "$dir" "$@" | tail -n 25
   fi
 }
 
@@ -81,6 +84,8 @@ release() {
   setup out/release -Dbuildtype=debugoptimized -Db_ndebug=false -Dhardening=true
   meson compile -C out/release
   meson test -C out/release --print-errorlogs
+  # ./build install trusts only a build whose whole gate passed for this exact hash.
+  printf '%s\n' "$GBK_VERSION" > out/release/released
   echo
   echo "built: out/release/src/gbk-file ($(out/release/src/gbk-file --version))"
 }
