@@ -1,5 +1,5 @@
 #include "scanner.h"
-#include "inotify-parse.h"
+#include "inotify-hub.h"
 
 #define WATCH_MASK (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB \
                     | IN_CLOSE_WRITE | IN_MODIFY | IN_DELETE_SELF | IN_MOVE_SELF | IN_ONLYDIR)
@@ -241,27 +241,11 @@ on_inotify_event (int wd, uint32_t mask, const char *name, size_t name_len, void
     }
 }
 
-/* Reads everything currently queued on the inotify fd. Returns false on a fatal error. */
-static bool
-drain_inotify (int ifd, Pending *p)
+/* Takes everything the hub has buffered for us. */
+static void
+drain_inotify (GbkInotifySub *sub, Pending *p)
 {
-  alignas (struct inotify_event) uint8_t buf[65536];
-  for (;;)
-    {
-      ssize_t n = read (ifd, buf, sizeof buf);
-      if (n < 0)
-        {
-          if (errno == EINTR)
-            continue;
-          if (errno == EAGAIN)
-            return true;
-          return false;
-        }
-      if (n == 0)
-        return true;
-      if (!gbk_inotify_parse (buf, (size_t) n, on_inotify_event, p))
-        p->overflow = true;            /* can't trust what we got: rescan */
-    }
+  gbk_inotify_sub_take (sub, on_inotify_event, p);
 }
 
 static void
@@ -297,14 +281,13 @@ now_ms (void)
 /* Waits for inotify activity or cancellation. timeout_ms < 0 waits forever.
  * Returns false if cancelled. */
 static bool
-wait_events (GbkScanner *s, int ifd, int timeout_ms)
+wait_events (GbkScanner *s, GbkInotifySub *sub, int timeout_ms)
 {
   struct pollfd fds[2] = {
     { .fd = s->cancel_fd, .events = POLLIN },
-    { .fd = ifd, .events = POLLIN },
+    { .fd = gbk_inotify_sub_fd (sub), .events = POLLIN },
   };
-  nfds_t n = ifd >= 0 ? 2 : 1;
-  while (poll (fds, n, timeout_ms) < 0 && errno == EINTR)
+  while (poll (fds, 2, timeout_ms) < 0 && errno == EINTR)
     ;
   return !is_cancelled (s);
 }
@@ -323,7 +306,7 @@ still_here (const char *path, int dirfd)
 }
 
 static void
-watch_loop (GbkScanner *s, int ifd, int self_wd, int parent_wd, int dirfd)
+watch_loop (GbkScanner *s, GbkInotifySub *sub, int self_wd, int parent_wd, int dirfd)
 {
   g_autofree char *base = g_path_get_basename (s->path);
   Pending p = {
@@ -335,13 +318,9 @@ watch_loop (GbkScanner *s, int ifd, int self_wd, int parent_wd, int dirfd)
 
   while (!is_cancelled (s))
     {
-      if (!wait_events (s, ifd, -1))
+      if (!wait_events (s, sub, -1))
         break;
-      if (!drain_inotify (ifd, &p))
-        {
-          push_error (s, GBK_SCAN_ERROR, errno);
-          break;
-        }
+      drain_inotify (sub, &p);
 
       /* Coalesce: keep collecting until things go quiet or the oldest event is too old. */
       int64_t deadline = now_ms () + GBK_SCAN_MAX_DELAY_MS;
@@ -350,12 +329,11 @@ watch_loop (GbkScanner *s, int ifd, int self_wd, int parent_wd, int dirfd)
           int64_t left = deadline - now_ms ();
           if (left <= 0)
             break;
-          struct pollfd pf = { .fd = ifd, .events = POLLIN };
+          struct pollfd pf = { .fd = gbk_inotify_sub_fd (sub), .events = POLLIN };
           int r = poll (&pf, 1, (int) MIN (left, GBK_SCAN_QUIET_MS));
           if (r <= 0)
             break;                     /* quiet (or error): flush now */
-          if (!drain_inotify (ifd, &p))
-            break;
+          drain_inotify (sub, &p);
         }
       if (is_cancelled (s))
         break;
@@ -379,7 +357,7 @@ watch_loop (GbkScanner *s, int ifd, int self_wd, int parent_wd, int dirfd)
         {
           /* Drop everything queued so far; the rescan supersedes it. Events arriving after
            * this drain are picked up by the next loop iteration. */
-          drain_inotify (ifd, &p);
+          drain_inotify (sub, &p);
           p.overflow = false;
           g_hash_table_remove_all (p.names);
           if (p.gone)
@@ -404,8 +382,8 @@ worker (void *data)
   GbkScanner *s = data;
 
   /* Watch before scanning, so nothing created during the scan is missed. */
-  int ifd = inotify_init1 (IN_NONBLOCK | IN_CLOEXEC);
-  int self_wd = ifd >= 0 ? inotify_add_watch (ifd, s->path, WATCH_MASK) : -1;
+  GbkInotifySub *sub = gbk_inotify_sub_new ();
+  int self_wd = gbk_inotify_sub_watch (sub, s->path, WATCH_MASK);
   bool live = self_wd >= 0;
   /* No watch (e.g. inotify limits exhausted): still list, just not live. */
   int parent_wd = -1;
@@ -414,7 +392,7 @@ worker (void *data)
       /* Our own deletion/move is only reliably visible from the parent (see watch_loop).
        * Best effort: an unwatchable parent just means we notice later. */
       g_autofree char *parent = g_path_get_dirname (s->path);
-      parent_wd = inotify_add_watch (ifd, parent, IN_DELETE | IN_MOVED_FROM | IN_ONLYDIR);
+      parent_wd = gbk_inotify_sub_watch (sub, parent, IN_DELETE | IN_MOVED_FROM | IN_ONLYDIR);
       if (parent_wd == self_wd)
         parent_wd = -1;          /* same inode (bind mounts): don't confuse the two */
     }
@@ -425,12 +403,11 @@ worker (void *data)
   else
     {
       if (full_scan (s, dirfd, live) && live)
-        watch_loop (s, ifd, self_wd, parent_wd, dirfd);
+        watch_loop (s, sub, self_wd, parent_wd, dirfd);
       close (dirfd);
     }
 
-  if (ifd >= 0)
-    close (ifd);
+  gbk_inotify_sub_free (sub);
   scanner_unref (s);
   g_atomic_int_dec_and_test (&live_workers);
   return nullptr;

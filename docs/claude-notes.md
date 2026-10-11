@@ -181,9 +181,12 @@ Modules (src/, all in libgbk-core except lifetime):
   basename, then confirm with still_here() (fstat nlink==0, or path no longer same inode).
   Test hooks: set_pending_max_for_test, rescans, live_workers.
   Free space: fstatvfs on the worker, carried in CHUNK(last)/DELTA messages.
-  TODO: one inotify instance per scanner; max_user_instances is 128 per user (shared with
-  the whole desktop). Many tabs could exhaust it -> live=false silently. Consider one
-  shared instance per process + wd demux, and surface "not live" in the UI.
+- inotify-hub: ONE inotify instance per process (max_user_instances is 128/user, shared
+  with the desktop). Hub thread reads it, routes by wd to GbkInotifySub buffers (mutex +
+  eventfd, cap GBK_INOTIFY_MAX_PENDING -> synthetic IN_Q_OVERFLOW -> rescan). Same inode
+  => same wd for several subs: add with IN_MASK_ADD (else the kernel REPLACES the mask),
+  rm_watch only when the last sub leaves. Both properties mutation-tested (tests fail
+  without them). Lock order: hub_lock -> sub->lock, never the reverse.
 - dirmodel: GObject, signals changed/state-changed. Generational slot handles (GbkHandle:
   gen<<32|slot). Rescan = mark (epoch) and sweep at last chunk. Incremental re-sort for
   small batches, full sort otherwise; gbk_dir_model_check_order() is the oracle.

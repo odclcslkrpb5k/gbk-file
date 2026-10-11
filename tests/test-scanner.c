@@ -1,5 +1,6 @@
 /* Directory model + scanner against a real filesystem (temp dirs inside the container). */
 #include "dirmodel.h"
+#include "inotify-hub.h"
 #include "lifetime.h"
 
 static GbkTypeTable *types;
@@ -45,6 +46,12 @@ static bool
 no_workers (void *data G_GNUC_UNUSED)
 {
   return gbk_scanner_live_workers () == 0;
+}
+
+static bool
+no_workers_but_one (void *data G_GNUC_UNUSED)
+{
+  return gbk_scanner_live_workers () == 1;
 }
 
 static void
@@ -402,6 +409,117 @@ test_sibling_deleted_is_not_us (void)
   rm_rf (parent);
 }
 
+/* ---- the shared inotify hub ---- */
+
+static int
+inotify_instances (void)
+{
+  int n = 0;
+  g_autoptr (GDir) d = g_dir_open ("/proc/self/fd", 0, nullptr);
+  const char *name;
+  while (d != nullptr && (name = g_dir_read_name (d)) != nullptr)
+    {
+      g_autofree char *link = g_build_filename ("/proc/self/fd", name, nullptr);
+      g_autofree char *target = g_file_read_link (link, nullptr);
+      if (target != nullptr && g_str_equal (target, "anon_inode:inotify"))
+        n++;
+    }
+  return n;
+}
+
+static void
+test_hub_single_instance (void)
+{
+  g_autofree char *dir = mktmp ();
+  GbkDirModel *models[10];
+  for (int i = 0; i < 10; i++)
+    {
+      g_autofree char *sub = g_strdup_printf ("%s/d%d", dir, i);
+      g_assert_cmpint (mkdir (sub, 0755), ==, 0);
+      models[i] = gbk_dir_model_new (sub, types);
+    }
+  for (int i = 0; i < 10; i++)
+    {
+      g_assert_true (wait_until (is_ready, models[i], 5000));
+      g_assert_true (gbk_dir_model_live (models[i]));
+    }
+  g_assert_cmpint (inotify_instances (), ==, 1);
+  for (int i = 0; i < 10; i++)
+    g_object_unref (models[i]);
+  g_assert_true (wait_until (no_workers, nullptr, 5000));
+  rm_rf (dir);
+}
+
+static void
+test_hub_same_dir_twice (void)
+{
+  g_autofree char *dir = mktmp ();
+  GbkDirModel *a = gbk_dir_model_new (dir, types);
+  GbkDirModel *b = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, a, 5000));
+  g_assert_true (wait_until (is_ready, b, 5000));
+  put (dir, "one");
+  MatchCtx ca = { a, dir }, cb = { b, dir };
+  g_assert_true (wait_until (model_matches_fs, &ca, 5000));
+  g_assert_true (wait_until (model_matches_fs, &cb, 5000));
+
+  /* Closing one must not remove the watch the other still uses. */
+  g_object_unref (a);
+  g_assert_true (wait_until (no_workers_but_one, nullptr, 5000));
+  put (dir, "two");
+  g_assert_true (wait_until (model_matches_fs, &cb, 5000));
+  g_assert_nonnull (gbk_dir_model_get (b, gbk_dir_model_find (b, "two")));
+  g_object_unref (b);
+  rm_rf (dir);
+}
+
+static void
+test_hub_parent_and_child (void)
+{
+  /* The child's parent-watch is the parent model's self-watch: same wd, merged masks. */
+  g_autofree char *dir = mktmp ();
+  g_autofree char *child = g_build_filename (dir, "child", nullptr);
+  g_assert_cmpint (mkdir (child, 0755), ==, 0);
+  GbkDirModel *parent = gbk_dir_model_new (dir, types);
+  GbkDirModel *kid = gbk_dir_model_new (child, types);
+  g_assert_true (wait_until (is_ready, parent, 5000));
+  g_assert_true (wait_until (is_ready, kid, 5000));
+
+  g_assert_cmpint (rmdir (child), ==, 0);
+  g_assert_true (wait_until (is_gone, kid, 5000));
+  MatchCtx c = { parent, dir };
+  g_assert_true (wait_until (model_matches_fs, &c, 5000));
+  g_object_unref (kid);
+
+  put (dir, "after");                       /* the parent is still live */
+  g_assert_true (wait_until (model_matches_fs, &c, 5000));
+  g_assert_cmpint (gbk_dir_model_state (parent), ==, GBK_DIR_READY);
+  g_object_unref (parent);
+  rm_rf (dir);
+}
+
+static void
+test_hub_subscriber_overflow (void)
+{
+  g_autofree char *dir = mktmp ();
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new (dir, types);
+  g_assert_true (wait_until (is_ready, m, 5000));
+  gbk_inotify_set_max_pending_for_test (0);   /* every event overflows: deterministic */
+  int before = gbk_scanner_rescans ();
+  for (int i = 0; i < 300; i++)
+    {
+      char name[16];
+      g_snprintf (name, sizeof name, "f%d", i);
+      put (dir, name);
+    }
+  MatchCtx c = { m, dir };
+  g_assert_true (wait_until (model_matches_fs, &c, 10000));
+  g_assert_cmpint (gbk_scanner_rescans (), >, before);
+  gbk_inotify_set_max_pending_for_test (GBK_INOTIFY_MAX_PENDING);
+  g_clear_object (&m);
+  rm_rf (dir);
+}
+
 static void
 test_errors (void)
 {
@@ -471,6 +589,10 @@ main (int argc, char **argv)
   g_test_add_func ("/scanner/moved-away", test_moved_away);
   g_test_add_func ("/scanner/sibling-deleted-is-not-us", test_sibling_deleted_is_not_us);
   g_test_add_func ("/scanner/errors", test_errors);
+  g_test_add_func ("/scanner/hub-single-instance", test_hub_single_instance);
+  g_test_add_func ("/scanner/hub-same-dir-twice", test_hub_same_dir_twice);
+  g_test_add_func ("/scanner/hub-parent-and-child", test_hub_parent_and_child);
+  g_test_add_func ("/scanner/hub-subscriber-overflow", test_hub_subscriber_overflow);
   g_test_add_func ("/scanner/cancel-mid-scan", test_cancel_mid_scan);
   int status = g_test_run ();
 
