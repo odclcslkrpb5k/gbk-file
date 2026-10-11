@@ -37,7 +37,7 @@ fail_errno (Ctx *c, const char *path, int err, const char *what)
 {
   c->incomplete = true;
   g_autofree char *shown = g_filename_display_name (path);
-  g_autoptr (GError) e = g_error_new (G_IO_ERROR, g_io_error_from_errno (err), "%s %s: %s",
+  g_autoptr (GError) e = g_error_new (G_IO_ERROR, (int) g_io_error_from_errno (err), "%s %s: %s",
                                       what, shown, g_strerror (err));
   GbkChoice ch = c->h->error != nullptr ? c->h->error (path, e, c->h->data) : GBK_CHOICE_CANCEL;
   if (ch == GBK_CHOICE_CANCEL)
@@ -49,7 +49,7 @@ static bool
 fail_msg (Ctx *c, const char *path, GIOErrorEnum code, const char *msg)
 {
   c->incomplete = true;
-  g_autoptr (GError) e = g_error_new_literal (G_IO_ERROR, code, msg);
+  g_autoptr (GError) e = g_error_new_literal (G_IO_ERROR, (int) code, msg);
   GbkChoice ch = c->h->error != nullptr ? c->h->error (path, e, c->h->data) : GBK_CHOICE_CANCEL;
   if (ch == GBK_CHOICE_CANCEL)
     c->cancelled = true;
@@ -657,7 +657,7 @@ gbk_ops_rename (const char *path, const char *new_name, GError **error)
       if (err == EEXIST)
         g_set_error (error, G_IO_ERROR, G_IO_ERROR_EXISTS, "\"%s\" already exists", shown);
       else
-        g_set_error (error, G_IO_ERROR, g_io_error_from_errno (err), "Can't rename to \"%s\": %s",
+        g_set_error (error, G_IO_ERROR, (int) g_io_error_from_errno (err), "Can't rename to \"%s\": %s",
                      shown, g_strerror (err));
       return false;
     }
