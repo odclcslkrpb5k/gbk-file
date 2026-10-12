@@ -299,6 +299,13 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   out/VERSION before every setup; meson.build reads it via project(version: files(...)),
   GBK_VERSION = meson.project_version(). (Was a separate build_id option -> meson summary
   printed "gbk-file undefined"; user spotted it.)
+- Repo is PUBLIC (user, 2026-10-12): github.com/odclcslkrpb5k/gbk-file. This notes file is
+  public too — keep it free of anything private.
+- Distribution: prebuilt binaries (user's choice). install.sh (repo root) is THE installer:
+  curl|bash downloads releases/latest (or GBK_VERSION) assets gbk-file, gbk-file.desktop.in,
+  SHA256SUMS; checks Ubuntu 26.04 x86_64 (GBK_ANY_OS=1 overrides); ./build install runs the
+  same script with GBK_FROM=out/dist/<hash>. ./build publish = gh release create <hash>
+  --latest (needs HEAD on origin/main, refuses existing). Other distros: deferred by user.
 - ./build install [prefix] (HOST side, default ~/.local — the one command writing outside
   the repo; only the USER runs it with the default prefix; I test with a prefix under out/).
   Refuses dirty tree; needs out/release/released == HEAD hash (written only after the full

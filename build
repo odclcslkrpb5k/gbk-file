@@ -10,6 +10,7 @@
 #   ./build install [prefix]
 #                     install the release binary + .desktop file (default prefix ~/.local);
 #                     runs `release` first unless it already passed for this exact commit.
+#   ./build publish   GitHub release of the release binary for HEAD (what install.sh fetches)
 #   ./build shell     interactive shell in the build image
 #   ./build image     (re)build the build image
 set -euo pipefail
@@ -25,53 +26,67 @@ build_image() {
   docker build -t "$tag" - < "$root/Dockerfile"
 }
 
-# Runs on the host: the only command that writes outside the repo.
-install_release() {
-  local prefix=${1:-$HOME/.local}
-  # Goes verbatim into the .desktop Exec line and sed; allow only characters that need no
-  # quoting in either.
-  if [[ $prefix != /* || $prefix =~ [^A-Za-z0-9/._+-] ]]; then
-    echo "install: prefix must be an absolute path of [A-Za-z0-9/._+-]: $prefix" >&2
-    exit 2
-  fi
+# Host side: a release build that passed the whole gate for exactly HEAD, staged with
+# what install.sh needs in out/dist/<hash>/. Prints that directory.
+staged_release() {
   if [[ -n $(git -C "$root" status --porcelain) ]]; then
-    echo "install: working tree is dirty; commit first so the installed hash means something." >&2
+    echo "$cmd: working tree is dirty; commit first so the hash means something." >&2
     exit 1
   fi
   local hash bin=$root/out/release/src/gbk-file stamp=$root/out/release/released
   hash=$(git -C "$root" rev-parse --short=12 HEAD)
   if [[ ! -f $stamp || $(<"$stamp") != "$hash" ]]; then
-    echo "install: no passing release for $hash yet; running ./build release" >&2
-    "$0" release
+    echo "$cmd: no passing release for $hash yet; running ./build release" >&2
+    "$0" release >&2
   fi
   # Belt and braces: the binary itself must say it is this commit.
   if [[ $("$bin" --version) != "gbk-file $hash" ]]; then
-    echo "install: $bin reports '$("$bin" --version)', expected 'gbk-file $hash'" >&2
+    echo "$cmd: $bin reports '$("$bin" --version)', expected 'gbk-file $hash'" >&2
     exit 1
   fi
+  local dist=$root/out/dist/$hash
+  rm -rf "$dist"
+  mkdir -p "$dist"
+  cp "$bin" "$root/data/gbk-file.desktop.in" "$dist/"
+  (cd "$dist" && sha256sum gbk-file gbk-file.desktop.in > SHA256SUMS)
+  echo "$dist"
+}
 
-  local bindir=$prefix/bin appdir=$prefix/share/applications
-  mkdir -p "$bindir" "$appdir"
-  # Copy beside the target, then rename over it: atomic, and running instances keep the
-  # old inode instead of seeing a half-written or truncated binary.
-  cp "$bin" "$bindir/.gbk-file.new"
-  chmod 755 "$bindir/.gbk-file.new"
-  mv -f "$bindir/.gbk-file.new" "$bindir/gbk-file"
-  sed "s|@BIN@|$bindir/gbk-file|g" "$root/data/gbk-file.desktop.in" > "$appdir/.gbk-file.desktop.new"
-  mv -f "$appdir/.gbk-file.desktop.new" "$appdir/gbk-file.desktop"
+# The one command that writes outside the repo. Same installer as the curl one-liner.
+install_release() {
+  local dist
+  dist=$(staged_release)
+  GBK_FROM=$dist GBK_PREFIX=${1:-$HOME/.local} "$root/install.sh"
+}
 
-  echo "installed gbk-file $hash"
-  echo "  $bindir/gbk-file"
-  echo "  $appdir/gbk-file.desktop"
-  echo "To make it the default for folders:"
-  echo "  xdg-mime default gbk-file.desktop inode/directory"
+# A GitHub release named after the hash, marked latest: what install.sh downloads.
+publish_release() {
+  local dist hash full
+  dist=$(staged_release)
+  hash=$(git -C "$root" rev-parse --short=12 HEAD)
+  full=$(git -C "$root" rev-parse HEAD)
+  git -C "$root" fetch -q origin
+  if ! git -C "$root" merge-base --is-ancestor HEAD origin/main; then
+    echo "publish: $hash isn't on origin/main; push first." >&2
+    exit 1
+  fi
+  if gh release view "$hash" >/dev/null 2>&1; then
+    echo "publish: release $hash already exists." >&2
+    exit 1
+  fi
+  gh release create "$hash" --target "$full" --latest --title "gbk-file $hash" \
+    --notes "Built from $full on Ubuntu 26.04 (x86_64), hardened release build; the full release gate (sanitizer tests, analyzer, fuzzing, hardened tests) passed.
+
+Install or update: \`curl -fsSL https://raw.githubusercontent.com/odclcslkrpb5k/gbk-file/main/install.sh | bash\`" \
+    "$dist/gbk-file" "$dist/gbk-file.desktop.in" "$dist/SHA256SUMS"
 }
 
 case "$cmd" in
   debug|analyze|release|shell|fuzz|bench) ;;
   install) install_release "${2:-}"; exit 0 ;;
+  publish) publish_release; exit 0 ;;
   image) build_image; exit 0 ;;
-  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
 
 docker image inspect "$tag" >/dev/null 2>&1 || build_image
