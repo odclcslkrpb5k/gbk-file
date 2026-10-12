@@ -1231,8 +1231,11 @@ test_tabs (void)
   send_key_to_window (w, GDK_KEY_Page_Down, GDK_CONTROL_MASK);
   wait_at (w, one);
 
-  /* Layout: the tab strip sits above the path bar, which belongs to the tab's page. */
+  /* Layout: the tab strip sits above the path bar, which belongs to the tab's page.
+   * Layout happens on GTK's next frame, not when the tab switches: let it run first. */
+  settle ();
   GtkWidget *bar_widget = GTK_WIDGET (gbk_window_pathbar (w));
+  g_assert_cmpint (gtk_widget_get_allocated_height (bar_widget), >, 1);
   GtkWidget *notebook = gtk_widget_get_ancestor (bar_widget, GTK_TYPE_NOTEBOOK);
   g_assert_nonnull (notebook);
   int bar_y, page_y;
