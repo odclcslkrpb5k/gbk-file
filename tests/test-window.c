@@ -382,6 +382,12 @@ clipboard_text (GbkWindow *w)
   return text;
 }
 
+static bool
+has_marker (void *data)
+{
+  return gbk_dir_model_find (model_of (data), "ran") != GBK_HANDLE_NONE;
+}
+
 static void
 test_context_menu (void)
 {
@@ -439,6 +445,8 @@ test_context_menu (void)
   g_autofree char *one = clipboard_text (w);
   g_assert_cmpstr (one, ==, prog);
   g_assert_true (wait_until (menus_gone, w));
+  /* The marker Execute created must be in the folder's model before selecting all. */
+  g_assert_true (wait_until (has_marker, w));
   gbk_view_select_all (gbk_window_view (w));
   choose (open_context_menu (w), "Copy Full Path");
   g_autofree char *all = clipboard_text (w);
