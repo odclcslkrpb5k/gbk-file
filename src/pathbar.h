@@ -8,7 +8,8 @@
 G_DECLARE_FINAL_TYPE (GbkPathbar, gbk_pathbar, GBK, PATHBAR, GtkBox)
 
 /* Signals:
- *   "navigate" (const char *path)   a button was clicked or a location was entered */
+ *   "navigate"     (const char *path)   a button was clicked or a location was entered
+ *   "context-menu" (const char *path, GdkEvent *trigger)   a button was right-clicked */
 
 GtkWidget *gbk_pathbar_new (void);
 void gbk_pathbar_set_path (GbkPathbar *bar, const char *path);
@@ -20,4 +21,6 @@ bool gbk_pathbar_editing (GbkPathbar *bar);
 char *gbk_pathbar_describe (GbkPathbar *bar);
 /* For tests: click the button for `path`. */
 void gbk_pathbar_click (GbkPathbar *bar, const char *path);
+/* For tests: the button for `path`. */
+GtkWidget *gbk_pathbar_button (GbkPathbar *bar, const char *path);
 GtkEntry *gbk_pathbar_entry (GbkPathbar *bar);

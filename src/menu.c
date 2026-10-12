@@ -37,22 +37,48 @@ action_matches_all (const GbkAction *a, GPtrArray *items)
   return items->len > 0;
 }
 
+static bool
+all_dirs (GPtrArray *items)
+{
+  for (guint i = 0; i < items->len; i++)
+    if (!((const GbkItem *) g_ptr_array_index (items, i))->is_dir)
+      return false;
+  return items->len > 0;
+}
+
 GArray *
-gbk_menu_entries (const GbkConfig *config, GPtrArray *items, bool background)
+gbk_menu_entries (const GbkConfig *config, GPtrArray *items, GbkMenuTarget target)
 {
   GArray *out = g_array_new (false, false, sizeof (GbkMenuEntry));
   const GbkItem *only = items->len == 1 ? g_ptr_array_index (items, 0) : nullptr;
 
-  if (background)
+  switch (target)
     {
+    case GBK_MENU_ON_BACKGROUND:
       add (out, GBK_MENU_PASTE, nullptr);
       add (out, GBK_MENU_COPY_PATH, nullptr);
       add (out, GBK_MENU_SEPARATOR, nullptr);
       add (out, GBK_MENU_TERMINAL_HERE, nullptr);
-    }
-  else
-    {
+      break;
+    case GBK_MENU_ON_PATHBAR:
+      if (only == nullptr || !only->is_dir)
+        gbk_fatal ("path bar menu needs exactly one folder");
       add (out, GBK_MENU_OPEN, nullptr);
+      add (out, GBK_MENU_OPEN_TAB, nullptr);
+      add (out, GBK_MENU_OPEN_WINDOW, nullptr);
+      add (out, GBK_MENU_TERMINAL_HERE, nullptr);
+      add (out, GBK_MENU_SEPARATOR, nullptr);
+      add (out, GBK_MENU_COPY, nullptr);
+      add (out, GBK_MENU_PASTE_INTO, nullptr);
+      add (out, GBK_MENU_COPY_PATH, nullptr);
+      break;
+    case GBK_MENU_ON_ITEMS:
+      add (out, GBK_MENU_OPEN, nullptr);
+      if (all_dirs (items))
+        {
+          add (out, GBK_MENU_OPEN_TAB, nullptr);
+          add (out, GBK_MENU_OPEN_WINDOW, nullptr);
+        }
       if (gbk_menu_common_mime (items) != nullptr)
         add (out, GBK_MENU_OPEN_WITH, nullptr);
       if (only != nullptr && gbk_open_can_execute (only))
@@ -73,6 +99,9 @@ gbk_menu_entries (const GbkConfig *config, GPtrArray *items, bool background)
       add (out, GBK_MENU_DELETE, nullptr);
       if (only != nullptr)
         add (out, GBK_MENU_RENAME, nullptr);
+      break;
+    default:
+      gbk_fatal ("bad menu target %d", (int) target);
     }
 
   add (out, GBK_MENU_SEPARATOR, nullptr);
@@ -83,11 +112,12 @@ gbk_menu_entries (const GbkConfig *config, GPtrArray *items, bool background)
         add (out, GBK_MENU_ACTION, a);
     }
 
-  if (background)
+  if (target == GBK_MENU_ON_BACKGROUND)
     {
       add (out, GBK_MENU_SEPARATOR, nullptr);
       add (out, GBK_MENU_SORT_NAME, nullptr);
       add (out, GBK_MENU_SORT_MTIME, nullptr);
+      add (out, GBK_MENU_SORT_SIZE, nullptr);
       add (out, GBK_MENU_SEPARATOR, nullptr);
       add (out, GBK_MENU_SHOW_HIDDEN, nullptr);
     }

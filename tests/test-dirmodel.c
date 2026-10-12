@@ -7,7 +7,9 @@ static GbkTypeTable *types;
 static GbkEntry *
 mk (const char *name, GbkFileKind kind, int64_t mtime)
 {
-  GbkEntryInfo info = { .kind = kind, .mtime_ns = mtime, .mode = 0644 };
+  /* Size follows mtime, so the size sort has something to order by too. */
+  GbkEntryInfo info = { .kind = kind, .mtime_ns = mtime, .size = (uint64_t) MAX (mtime, 0),
+                        .mode = 0644 };
   GbkEntry *e = gbk_entry_new (name, strlen (name), &info, types);
   g_assert_nonnull (e);
   return e;
@@ -92,6 +94,40 @@ test_order_mtime (void)
   gbk_dir_model_set_sort (m, GBK_SORT_MTIME);
   gbk_dir_model_check_order (m);
   assert_visible (m, "dir1/ dir2/ new mid old");   /* dirs first; dir mtimes tie -> name */
+}
+
+static GbkEntry *
+mk_sized (const char *name, GbkFileKind kind, uint64_t size)
+{
+  GbkEntryInfo info = { .kind = kind, .size = size, .mode = 0644 };
+  GbkEntry *e = gbk_entry_new (name, strlen (name), &info, types);
+  g_assert_nonnull (e);
+  return e;
+}
+
+static void
+test_order_size (void)
+{
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new_detached (types);
+  GbkScanMsg *s = msg (GBK_SCAN_CHUNK);
+  s->first = s->last = s->live = true;
+  g_ptr_array_add (s->upserts, mk_sized ("small", GBK_KIND_REGULAR, 10));
+  g_ptr_array_add (s->upserts, mk_sized ("zdir", GBK_KIND_DIRECTORY, 9999));
+  g_ptr_array_add (s->upserts, mk_sized ("big", GBK_KIND_REGULAR, 5000));
+  g_ptr_array_add (s->upserts, mk_sized ("adir", GBK_KIND_DIRECTORY, 1));
+  g_ptr_array_add (s->upserts, mk_sized ("same-b", GBK_KIND_REGULAR, 10));
+  gbk_dir_model_apply_for_test (m, s);
+  gbk_dir_model_set_sort (m, GBK_SORT_SIZE);
+  gbk_dir_model_check_order (m);
+  /* Folders first by name (their size means nothing); files largest first, ties by name. */
+  assert_visible (m, "adir/ zdir/ big same-b small");
+
+  /* A file that grows moves up. */
+  GbkScanMsg *d = msg (GBK_SCAN_DELTA);
+  g_ptr_array_add (d->upserts, mk_sized ("small", GBK_KIND_REGULAR, 6000));
+  gbk_dir_model_apply_for_test (m, d);
+  gbk_dir_model_check_order (m);
+  assert_visible (m, "adir/ zdir/ small big same-b");
 }
 
 static void
@@ -229,8 +265,7 @@ test_random_oracle (void)
       if (round % 500 == 0)
         gbk_dir_model_set_show_hidden (m, !gbk_dir_model_show_hidden (m));
       if (round % 700 == 0)
-        gbk_dir_model_set_sort (m, gbk_dir_model_sort (m) == GBK_SORT_NAME ? GBK_SORT_MTIME
-                                                                           : GBK_SORT_NAME);
+        gbk_dir_model_set_sort (m, (GbkSortMode) ((gbk_dir_model_sort (m) + 1) % 3));
       gbk_dir_model_check_order (m);
     }
   g_rand_free (r);
@@ -268,6 +303,7 @@ main (int argc, char **argv)
 
   g_test_add_func ("/dirmodel/order-name", test_order_name);
   g_test_add_func ("/dirmodel/order-mtime", test_order_mtime);
+  g_test_add_func ("/dirmodel/order-size", test_order_size);
   g_test_add_func ("/dirmodel/handles", test_handles);
   g_test_add_func ("/dirmodel/update-keeps-handle", test_update_keeps_handle);
   g_test_add_func ("/dirmodel/rescan-sweep", test_rescan_sweep);

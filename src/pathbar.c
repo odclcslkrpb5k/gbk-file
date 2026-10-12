@@ -18,7 +18,7 @@ struct _GbkPathbar
 
 G_DEFINE_FINAL_TYPE (GbkPathbar, gbk_pathbar, GTK_TYPE_BOX)
 
-enum { SIGNAL_NAVIGATE, N_SIGNALS };
+enum { SIGNAL_NAVIGATE, SIGNAL_CONTEXT_MENU, N_SIGNALS };
 static guint signals[N_SIGNALS];
 
 static bool
@@ -43,6 +43,16 @@ on_button_clicked (GtkToggleButton *button, GbkPathbar *bar)
   g_signal_emit (bar, signals[SIGNAL_NAVIGATE], 0, copy);
 }
 
+static gboolean
+on_button_press (GtkWidget *button, GdkEventButton *ev, GbkPathbar *bar)
+{
+  if (!gdk_event_triggers_context_menu ((GdkEvent *) ev))
+    return false;
+  g_autofree char *copy = g_strdup (g_object_get_data (G_OBJECT (button), KEY_PATH));
+  g_signal_emit (bar, signals[SIGNAL_CONTEXT_MENU], 0, copy, (GdkEvent *) ev);
+  return true;          /* no press/toggle for a right-click */
+}
+
 static GtkWidget *
 make_button (GbkPathbar *bar, const char *path, const char *label, const char *icon)
 {
@@ -58,6 +68,7 @@ make_button (GbkPathbar *bar, const char *path, const char *label, const char *i
   g_object_set_data_full (G_OBJECT (button), KEY_PATH, g_strdup (path), g_free);
   g_object_set_data_full (G_OBJECT (button), "gbk-label", g_strdup (label), g_free);
   gbk_connect (G_OBJECT (bar), button, "clicked", G_CALLBACK (on_button_clicked), bar);
+  gbk_connect (G_OBJECT (bar), button, "button-press-event", G_CALLBACK (on_button_press), bar);
   return button;
 }
 
@@ -236,6 +247,16 @@ gbk_pathbar_click (GbkPathbar *bar, const char *path)
   gbk_fatal ("no path bar button for %s", path);
 }
 
+GtkWidget *
+gbk_pathbar_button (GbkPathbar *bar, const char *path)
+{
+  g_autoptr (GList) kids = gtk_container_get_children (GTK_CONTAINER (bar->buttons));
+  for (GList *l = kids; l != nullptr; l = l->next)
+    if (g_str_equal (g_object_get_data (l->data, KEY_PATH), path))
+      return l->data;
+  gbk_fatal ("no path bar button for %s", path);
+}
+
 GtkEntry *
 gbk_pathbar_entry (GbkPathbar *bar)
 {
@@ -260,6 +281,11 @@ gbk_pathbar_class_init (GbkPathbarClass *klass)
   signals[SIGNAL_NAVIGATE] = g_signal_new ("navigate", G_TYPE_FROM_CLASS (klass),
                                            G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
                                            G_TYPE_NONE, 1, G_TYPE_STRING);
+  /* GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE: the event is passed through, not copied. */
+  signals[SIGNAL_CONTEXT_MENU] = g_signal_new ("context-menu", G_TYPE_FROM_CLASS (klass),
+                                               G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
+                                               G_TYPE_NONE, 2, G_TYPE_STRING,
+                                               GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
 }
 
 static void

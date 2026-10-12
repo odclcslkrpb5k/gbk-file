@@ -272,8 +272,20 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   (otherwise Delete/Ctrl+V/F2 in the location bar act on files). Tested both ways.
   Several folders activated -> new tabs. Trash: no confirmation; Shift+Delete confirms.
 - Title bar = full path of the active folder, nothing else (user, 2026-10-11).
-- Status bar right side: "Sort: Name|Date Modified  |  Hidden files: On|Off" (user asked
-  for modes surfaced, right-aligned).
+- Status bar (user mockup, 2026-10-12): left "4 folders · 6 files   13.1 GiB free",
+  "name  28.6 KiB   … free", "3 selected  41.2 KiB   … free". Right: small buttons, never
+  focusable: sort button "↑Name"/"↓Modified"/"↓Size", click cycles (table `sorts[]` in
+  window.c is the single list: state string, label, tooltip); ".*" GtkToggleButton bound to
+  win.show-hidden via GtkActionable (state syncs itself). win.sort ignores unknown values
+  (actions are reachable over D-Bus).
+- Sort by size: folders first BY NAME (dir size meaningless), files largest first, ties by
+  name. Config SortBy=name|modified|size.
+- Menus: gbk_menu_entries takes GbkMenuTarget (ITEMS/BACKGROUND/PATHBAR). Open in New
+  Tab/Window when all items are folders (tab: switch to the first; window: one per folder).
+  Path bar right-click (real button-press, tests synthesize one via
+  gtk_button_get_event_window): Open, New Tab/Window, Terminal Here, Copy, Paste Into, Copy
+  Full Path, actions — NO cut/trash/delete/rename (the tab is inside that folder). Menu is
+  attached to the path bar (dies with it). on_menu_item holds its own ref on the items.
 - User decisions 2026-10-11: no far-right terminal toolbar icon; hamburger menu contents OK
   for now; no shortcuts while the location entry has focus is correct; no middle-click
   features; hidden/sort window-wide is right.

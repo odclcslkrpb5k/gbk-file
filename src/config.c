@@ -183,8 +183,10 @@ load_general (Loader *l)
         l->c->sort = GBK_SORT_NAME;
       else if (g_str_equal (v, "modified"))
         l->c->sort = GBK_SORT_MTIME;
+      else if (g_str_equal (v, "size"))
+        l->c->sort = GBK_SORT_SIZE;
       else
-        fail (l, "[%s] SortBy: expected name or modified, got \"%s\"", g, v);
+        fail (l, "[%s] SortBy: expected name, modified or size, got \"%s\"", g, v);
     }
 }
 

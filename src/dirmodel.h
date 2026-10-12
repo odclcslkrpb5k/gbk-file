@@ -16,6 +16,7 @@ typedef enum
 {
   GBK_SORT_NAME,       /* natural, case-insensitive; folders first */
   GBK_SORT_MTIME,      /* newest first; folders first; ties by name */
+  GBK_SORT_SIZE,       /* largest first; folders first, by name (no meaningful size) */
 } GbkSortMode;
 
 typedef enum

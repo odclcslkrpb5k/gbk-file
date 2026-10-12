@@ -13,7 +13,8 @@ struct _GbkWindow
   GbkContext *ctx;
   GtkNotebook *tabs;
   GtkLabel *status;
-  GtkLabel *modes;        /* right side of the status bar: sort and hidden-files state */
+  GtkButton *sort_button; /* status bar, right: shows the sort, click cycles it */
+  GtkToggleButton *hidden_button;   /* status bar, right: ".*", bound to win.show-hidden */
 
   bool show_hidden;       /* window-wide: applies to every tab */
   GbkSortMode sort;
@@ -57,13 +58,35 @@ set_title_path (GbkWindow *w, const char *path)
   gtk_window_set_title (GTK_WINDOW (w), shown);
 }
 
-static void
-update_modes (GbkWindow *w)
+/* Sort modes in the order the status bar button cycles through them. The arrow says which
+ * way the list runs: names A to Z, dates newest first, sizes largest first. */
+static const struct
 {
-  g_autofree char *text = g_strdup_printf ("Sort: %s  |  Hidden files: %s",
-                                           w->sort == GBK_SORT_MTIME ? "Date Modified" : "Name",
-                                           w->show_hidden ? "On" : "Off");
-  gtk_label_set_text (w->modes, text);
+  GbkSortMode mode;
+  const char *state;     /* win.sort state */
+  const char *label;
+  const char *tooltip;
+} sorts[] = {
+  { GBK_SORT_NAME, "name", "↑Name", "Sorted by name. Click to sort by date modified." },
+  { GBK_SORT_MTIME, "modified", "↓Modified", "Sorted by date modified, newest first. Click to sort by size." },
+  { GBK_SORT_SIZE, "size", "↓Size", "Sorted by size, largest first. Click to sort by name." },
+};
+
+static size_t
+sort_index (GbkSortMode mode)
+{
+  for (size_t i = 0; i < G_N_ELEMENTS (sorts); i++)
+    if (sorts[i].mode == mode)
+      return i;
+  gbk_fatal ("sort mode %d missing from the cycle", (int) mode);
+}
+
+static void
+update_sort_button (GbkWindow *w)
+{
+  size_t i = sort_index (w->sort);
+  gtk_button_set_label (w->sort_button, sorts[i].label);
+  gtk_widget_set_tooltip_text (GTK_WIDGET (w->sort_button), sorts[i].tooltip);
 }
 
 static void
@@ -130,6 +153,7 @@ update_tabs_visible (GbkWindow *w)
 static void on_activate (GbkView *v, GbkWindow *w);
 static GtkWidget *app_menu_button (void);
 static void on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w);
+static void on_pathbar_menu (GbkPathbar *bar, const char *path, GdkEvent *event, GbkWindow *w);
 
 static GbkBrowser *
 add_tab (GbkWindow *w, const char *path, bool switch_to)
@@ -164,6 +188,8 @@ add_tab (GbkWindow *w, const char *path, bool switch_to)
   gbk_connect (G_OBJECT (w), b, "status-changed", G_CALLBACK (on_browser_status), w);
   gbk_connect (G_OBJECT (w), v, "activate", G_CALLBACK (on_activate), w);
   gbk_connect (G_OBJECT (w), v, "context-menu", G_CALLBACK (on_context_menu), w);
+  gbk_connect (G_OBJECT (w), gbk_browser_pathbar (b), "context-menu",
+               G_CALLBACK (on_pathbar_menu), w);
 
   gtk_widget_show_all (GTK_WIDGET (b));
   int at = gtk_notebook_get_current_page (w->tabs) + 1;
@@ -204,8 +230,8 @@ set_show_hidden (GbkWindow *w, bool show)
   for (int i = 0; i < gtk_notebook_get_n_pages (w->tabs); i++)
     gbk_browser_set_show_hidden (GBK_BROWSER (gtk_notebook_get_nth_page (w->tabs, i)), show);
   GAction *a = g_action_map_lookup_action (G_ACTION_MAP (w), "show-hidden");
+  /* Also updates the status bar's ".*" toggle, which is bound to this action. */
   g_simple_action_set_state (G_SIMPLE_ACTION (a), g_variant_new_boolean (show));
-  update_modes (w);
 }
 
 static void
@@ -215,9 +241,14 @@ set_sort (GbkWindow *w, GbkSortMode sort)
   for (int i = 0; i < gtk_notebook_get_n_pages (w->tabs); i++)
     gbk_browser_set_sort (GBK_BROWSER (gtk_notebook_get_nth_page (w->tabs, i)), sort);
   GAction *a = g_action_map_lookup_action (G_ACTION_MAP (w), "sort");
-  g_simple_action_set_state (G_SIMPLE_ACTION (a),
-                             g_variant_new_string (sort == GBK_SORT_MTIME ? "modified" : "name"));
-  update_modes (w);
+  g_simple_action_set_state (G_SIMPLE_ACTION (a), g_variant_new_string (sorts[sort_index (sort)].state));
+  update_sort_button (w);
+}
+
+static void
+on_sort_button_clicked (GtkButton *button G_GNUC_UNUSED, GbkWindow *w)
+{
+  set_sort (w, sorts[(sort_index (w->sort) + 1) % G_N_ELEMENTS (sorts)].mode);
 }
 
 /* ---- opening things ---- */
@@ -530,7 +561,8 @@ copy_paths (GbkWindow *w, GbkBrowser *b, GPtrArray *items)
 static void
 on_menu_item (GtkMenuItem *mi, GbkWindow *w)
 {
-  GPtrArray *items = menu_items_of (GTK_WIDGET (mi));
+  /* Our own reference: what an entry does must not free the snapshot it's working from. */
+  g_autoptr (GPtrArray) items = g_ptr_array_ref (menu_items_of (GTK_WIDGET (mi)));
   /* The tab the menu was opened in (it may no longer be the active one). */
   GbkBrowser *b = g_object_get_data (G_OBJECT (menu_of (GTK_WIDGET (mi))), KEY_BROWSER);
   if (b == nullptr)
@@ -548,6 +580,18 @@ on_menu_item (GtkMenuItem *mi, GbkWindow *w)
     {
     case GBK_MENU_OPEN:
       open_items (w, b, items);
+      break;
+    case GBK_MENU_OPEN_TAB:
+      for (guint i = 0; i < items->len; i++)       /* show the first one opened */
+        add_tab (w, ((GbkItem *) g_ptr_array_index (items, i))->path, i == 0);
+      break;
+    case GBK_MENU_OPEN_WINDOW:
+      for (guint i = 0; i < items->len; i++)
+        {
+          GbkWindow *n = gbk_window_new (gtk_window_get_application (GTK_WINDOW (w)), w->ctx,
+                                         ((GbkItem *) g_ptr_array_index (items, i))->path);
+          gtk_widget_show_all (GTK_WIDGET (n));
+        }
       break;
     case GBK_MENU_OPEN_WITH:
       {
@@ -573,6 +617,9 @@ on_menu_item (GtkMenuItem *mi, GbkWindow *w)
       break;
     case GBK_MENU_SORT_MTIME:
       set_sort (w, GBK_SORT_MTIME);
+      break;
+    case GBK_MENU_SORT_SIZE:
+      set_sort (w, GBK_SORT_SIZE);
       break;
     case GBK_MENU_SHOW_HIDDEN:
       set_show_hidden (w, !w->show_hidden);
@@ -656,20 +703,17 @@ on_attach_destroyed (GtkWidget *attach G_GNUC_UNUSED, GtkWidget *menu)
   gtk_widget_destroy (menu);
 }
 
+/* Build and pop up the context menu for `items` in tab `b`. The menu is attached to
+ * `attach` and destroyed with it (or after it closes). */
 static void
-on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
+popup_menu (GbkWindow *w, GbkBrowser *b, GPtrArray *items, GbkMenuTarget target,
+            GtkWidget *attach, GdkEvent *event)
 {
-  GbkBrowser *b = browser_of (v);
-  g_autoptr (GPtrArray) items = snapshot_selection (w, b);
-  bool background = items->len == 0;
-  if (background)
-    g_ptr_array_add (items, gbk_item_new_dir (gbk_browser_path (b)));
-
-  g_autoptr (GArray) entries = gbk_menu_entries (w->ctx->config, items, background);
+  g_autoptr (GArray) entries = gbk_menu_entries (w->ctx->config, items, target);
   GtkWidget *menu = gtk_menu_new ();
   g_object_set_data_full (G_OBJECT (menu), KEY_ITEMS, g_ptr_array_ref (items),
                           (GDestroyNotify) g_ptr_array_unref);
-  /* Borrowed: the menu dies with the view (below), and the view with the browser. */
+  /* Borrowed: the menu dies with `attach` (below), which dies with the browser. */
   g_object_set_data (G_OBJECT (menu), KEY_BROWSER, b);
 
   for (guint i = 0; i < entries->len; i++)
@@ -681,6 +725,8 @@ on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
           gtk_menu_shell_append (GTK_MENU_SHELL (menu), gtk_separator_menu_item_new ());
           break;
         case GBK_MENU_OPEN: menu_item (w, menu, "Open", e->kind); break;
+        case GBK_MENU_OPEN_TAB: menu_item (w, menu, "Open in New Tab", e->kind); break;
+        case GBK_MENU_OPEN_WINDOW: menu_item (w, menu, "Open in New Window", e->kind); break;
         case GBK_MENU_OPEN_WITH: add_open_with (w, menu, gbk_menu_common_mime (items)); break;
         case GBK_MENU_EXECUTE: menu_item (w, menu, "Execute", e->kind); break;
         case GBK_MENU_EXECUTE_TERMINAL: menu_item (w, menu, "Execute in Terminal", e->kind); break;
@@ -696,6 +742,9 @@ on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
           break;
         case GBK_MENU_SORT_MTIME:
           check_item (w, menu, "Sort by Date Modified", e->kind, w->sort == GBK_SORT_MTIME, true);
+          break;
+        case GBK_MENU_SORT_SIZE:
+          check_item (w, menu, "Sort by Size", e->kind, w->sort == GBK_SORT_SIZE, true);
           break;
         case GBK_MENU_SHOW_HIDDEN:
           check_item (w, menu, "Show Hidden Files", e->kind, w->show_hidden, false);
@@ -713,11 +762,11 @@ on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
         }
     }
 
-  gtk_menu_attach_to_widget (GTK_MENU (menu), GTK_WIDGET (v), nullptr);
+  gtk_menu_attach_to_widget (GTK_MENU (menu), attach, nullptr);
   gbk_connect (G_OBJECT (menu), menu, "deactivate", G_CALLBACK (on_menu_deactivate), nullptr);
   /* A GtkMenu is its own toplevel: destroying the widget it's attached to doesn't destroy
-   * it. Tie it to the view, or closing the window with a menu open leaks the menu. */
-  gbk_connect (G_OBJECT (menu), v, "destroy", G_CALLBACK (on_attach_destroyed), menu);
+   * it. Tie it to that widget, or closing the window with a menu open leaks the menu. */
+  gbk_connect (G_OBJECT (menu), attach, "destroy", G_CALLBACK (on_attach_destroyed), menu);
   gtk_widget_show_all (menu);
   /* Keyboard-triggered menus come without an event; GTK needs one (for the grab), and the
    * key press being handled is it. */
@@ -726,8 +775,35 @@ on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
   if (trigger != nullptr && trigger->type == GDK_BUTTON_PRESS)
     gtk_menu_popup_at_pointer (GTK_MENU (menu), trigger);
   else
-    gtk_menu_popup_at_widget (GTK_MENU (menu), GTK_WIDGET (v), GDK_GRAVITY_CENTER,
+    gtk_menu_popup_at_widget (GTK_MENU (menu), attach, GDK_GRAVITY_CENTER,
                               GDK_GRAVITY_NORTH_WEST, trigger);
+}
+
+static void
+on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
+{
+  GbkBrowser *b = browser_of (v);
+  g_autoptr (GPtrArray) items = snapshot_selection (w, b);
+  GbkMenuTarget target = GBK_MENU_ON_ITEMS;
+  if (items->len == 0)
+    {
+      target = GBK_MENU_ON_BACKGROUND;
+      g_ptr_array_add (items, gbk_item_new_dir (gbk_browser_path (b)));
+    }
+  popup_menu (w, b, items, target, GTK_WIDGET (v), event);
+}
+
+/* Path bar buttons are folders: the current one and its ancestors (and, after going up,
+ * the deeper ones still shown). */
+static void
+on_pathbar_menu (GbkPathbar *bar, const char *path, GdkEvent *event, GbkWindow *w)
+{
+  GtkWidget *b = gtk_widget_get_ancestor (GTK_WIDGET (bar), GBK_TYPE_BROWSER);
+  if (b == nullptr)
+    gbk_fatal ("path bar outside a browser");
+  g_autoptr (GPtrArray) items = g_ptr_array_new_with_free_func ((GDestroyNotify) gbk_item_free);
+  g_ptr_array_add (items, gbk_item_new_dir (path));
+  popup_menu (w, GBK_BROWSER (b), items, GBK_MENU_ON_PATHBAR, GTK_WIDGET (bar), event);
 }
 
 /* ---- actions ---- */
@@ -816,8 +892,11 @@ change_show_hidden (GSimpleAction *a G_GNUC_UNUSED, GVariant *state, void *data)
 static void
 change_sort (GSimpleAction *a G_GNUC_UNUSED, GVariant *state, void *data)
 {
-  set_sort (data, g_str_equal (g_variant_get_string (state, nullptr), "modified")
-                    ? GBK_SORT_MTIME : GBK_SORT_NAME);
+  /* Actions are reachable from outside the process (D-Bus): ignore unknown values. */
+  const char *want = g_variant_get_string (state, nullptr);
+  for (size_t i = 0; i < G_N_ELEMENTS (sorts); i++)
+    if (g_str_equal (want, sorts[i].state))
+      set_sort (data, sorts[i].mode);
 }
 
 static const GActionEntry actions[] = {
@@ -929,6 +1008,7 @@ app_menu_button (void)
   g_menu_append (s2, "Show Hidden Files", "win.show-hidden");
   g_menu_append (s2, "Sort by Name", "win.sort::name");
   g_menu_append (s2, "Sort by Date Modified", "win.sort::modified");
+  g_menu_append (s2, "Sort by Size", "win.sort::size");
   g_menu_append_section (menu, nullptr, G_MENU_MODEL (s2));
   g_autoptr (GMenu) s3 = g_menu_new ();
   g_menu_append (s3, "Open Terminal Here", "win.terminal");
@@ -974,10 +1054,33 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   w->status = GTK_LABEL (gtk_label_new (""));
   gtk_label_set_xalign (w->status, 0);
   gtk_label_set_ellipsize (w->status, PANGO_ELLIPSIZE_END);
-  w->modes = GTK_LABEL (gtk_label_new (""));
-  gtk_label_set_xalign (w->modes, 1);
   gtk_box_pack_start (GTK_BOX (status_bar), GTK_WIDGET (w->status), true, true, 0);
-  gtk_box_pack_end (GTK_BOX (status_bar), GTK_WIDGET (w->modes), false, false, 0);
+
+  /* Right: the sort and hidden-files modes, as small buttons that change them. They never
+   * take focus, so the keyboard stays on the files. */
+  g_autoptr (GtkCssProvider) css = gtk_css_provider_new ();
+  g_autoptr (GError) css_error = nullptr;
+  if (!gtk_css_provider_load_from_data (css, "button { padding: 0 6px; min-height: 0; }", -1,
+                                        &css_error))
+    gbk_fatal ("status bar CSS: %s", css_error->message);
+  GtkWidget *modes = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+  w->sort_button = GTK_BUTTON (gtk_button_new_with_label (""));
+  w->hidden_button = GTK_TOGGLE_BUTTON (gtk_toggle_button_new_with_label (".*"));
+  gtk_widget_set_tooltip_text (GTK_WIDGET (w->hidden_button), "Show hidden files (Ctrl+H)");
+  gtk_actionable_set_action_name (GTK_ACTIONABLE (w->hidden_button), "win.show-hidden");
+  GtkWidget *mode_buttons[] = { GTK_WIDGET (w->sort_button), GTK_WIDGET (w->hidden_button) };
+  for (size_t i = 0; i < G_N_ELEMENTS (mode_buttons); i++)
+    {
+      gtk_widget_set_focus_on_click (mode_buttons[i], false);
+      gtk_widget_set_can_focus (mode_buttons[i], false);
+      gtk_widget_set_valign (mode_buttons[i], GTK_ALIGN_CENTER);
+      gtk_style_context_add_provider (gtk_widget_get_style_context (mode_buttons[i]),
+                                      GTK_STYLE_PROVIDER (css),
+                                      GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+      gtk_box_pack_start (GTK_BOX (modes), mode_buttons[i], false, false, 0);
+    }
+  gbk_connect (G_OBJECT (w), w->sort_button, "clicked", G_CALLBACK (on_sort_button_clicked), w);
+  gtk_box_pack_end (GTK_BOX (status_bar), modes, false, false, 0);
   gtk_box_pack_start (GTK_BOX (box), status_bar, false, false, 0);
   gtk_container_add (GTK_CONTAINER (w), box);
 
@@ -1021,10 +1124,16 @@ gbk_window_status (GbkWindow *w)
   return gtk_label_get_text (w->status);
 }
 
-const char *
-gbk_window_modes (GbkWindow *w)
+GtkButton *
+gbk_window_sort_button (GbkWindow *w)
 {
-  return gtk_label_get_text (w->modes);
+  return w->sort_button;
+}
+
+GtkToggleButton *
+gbk_window_hidden_button (GbkWindow *w)
+{
+  return w->hidden_button;
 }
 
 int

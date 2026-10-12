@@ -1,4 +1,4 @@
-/* A browser window: path bar, tabs (one GbkBrowser each), status bar. Actions apply to the
+/* A browser window: tabs (one GbkBrowser each, with its path bar), status bar. Actions apply to the
  * active tab; show-hidden and sort apply window-wide. */
 #pragma once
 
@@ -18,7 +18,9 @@ void gbk_window_new_tab (GbkWindow *w, const char *path);
 const char *gbk_window_path (GbkWindow *w);
 GbkView *gbk_window_view (GbkWindow *w);
 const char *gbk_window_status (GbkWindow *w);
-/* Right side of the status bar: "Sort: … | Hidden files: …". */
-const char *gbk_window_modes (GbkWindow *w);
+/* Right side of the status bar: the sort button (label "↑Name" etc.; click cycles name ->
+ * modified -> size) and the ".*" hidden-files toggle. */
+GtkButton *gbk_window_sort_button (GbkWindow *w);
+GtkToggleButton *gbk_window_hidden_button (GbkWindow *w);
 int gbk_window_n_tabs (GbkWindow *w);
 GbkPathbar *gbk_window_pathbar (GbkWindow *w);

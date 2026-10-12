@@ -107,6 +107,8 @@ compare_entries (const GbkEntry *a, const GbkEntry *b, GbkSortMode mode)
     return da ? -1 : 1;
   if (mode == GBK_SORT_MTIME && a->mtime_ns != b->mtime_ns)
     return a->mtime_ns > b->mtime_ns ? -1 : 1;
+  if (mode == GBK_SORT_SIZE && !da && a->size != b->size)
+    return a->size > b->size ? -1 : 1;
   int c = gbk_natural_compare (gbk_entry_key (a), a->key_len, gbk_entry_key (b), b->key_len);
   if (c != 0)
     return c;

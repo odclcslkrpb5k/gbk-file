@@ -108,7 +108,7 @@ test_errors (void)
   assert_errors ("[Genral]\n", "unknown section [Genral]");
   assert_errors ("[General]\nTerminl=x\n", "unknown key \"Terminl\"");
   assert_errors ("[General]\nShowHidden=yes\n", "expected true or false");
-  assert_errors ("[General]\nSortBy=size\n", "expected name or modified");
+  assert_errors ("[General]\nSortBy=bigness\n", "expected name, modified or size");
   assert_errors ("[General]\nTerminal=st %f\n", "not allowed here");
   assert_errors ("[General]\nTerminalRun=st -d %d\n", "must contain %c");
   assert_errors ("[General]\nTerminal=st 'oops\n", "can't parse command");

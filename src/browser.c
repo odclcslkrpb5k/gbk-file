@@ -70,13 +70,11 @@ gbk_browser_status (GbkBrowser *b)
       if (n_sel == 1)
         {
           const GbkEntry *e = gbk_dir_model_get (m, sel[0]);
-          g_string_append_printf (s, "\"%s\"", gbk_entry_display (e));
-          if (gbk_entry_is_dir (e))
-            g_string_append (s, " folder");
-          else if (!(e->flags & GBK_ENTRY_STAT_FAILED))
+          g_string_append (s, gbk_entry_display (e));
+          if (!gbk_entry_is_dir (e) && !(e->flags & GBK_ENTRY_STAT_FAILED))
             {
               g_autofree char *size = format_size (e->size);
-              g_string_append_printf (s, " (%s)", size);
+              g_string_append_printf (s, "  %s", size);
             }
         }
       else if (n_sel > 1)
@@ -89,7 +87,7 @@ gbk_browser_status (GbkBrowser *b)
                 total += e->size;
             }
           g_autofree char *size = format_size (total);
-          g_string_append_printf (s, "%zu items selected (%s)", n_sel, size);
+          g_string_append_printf (s, "%zu selected  %s", n_sel, size);
         }
       else
         {
@@ -101,7 +99,7 @@ gbk_browser_status (GbkBrowser *b)
           if (dirs > 0)
             g_string_append_printf (s, "%zu %s", dirs, dirs == 1 ? "folder" : "folders");
           if (files > 0)
-            g_string_append_printf (s, "%s%zu %s", dirs > 0 ? ", " : "", files,
+            g_string_append_printf (s, "%s%zu %s", dirs > 0 ? " · " : "", files,
                                     files == 1 ? "file" : "files");
           if (n == 0)
             g_string_append (s, gbk_dir_model_state (m) == GBK_DIR_LOADING ? "Loading…" : "Empty");
@@ -110,7 +108,7 @@ gbk_browser_status (GbkBrowser *b)
       if (gbk_dir_model_free_space (m, &free_bytes))
         {
           g_autofree char *size = format_size (free_bytes);
-          g_string_append_printf (s, "  |  Free space: %s", size);
+          g_string_append_printf (s, "   %s free", size);
         }
     }
   return g_string_free (s, false);

@@ -113,13 +113,18 @@ test_navigation (void)
   GbkWindow *w = gbk_window_new (app, ctx, root);
   gtk_widget_show_all (GTK_WIDGET (w));
   wait_at (w, root);
-  g_assert_nonnull (strstr (gbk_window_status (w), "3 folders, 1 file"));
-  g_assert_nonnull (strstr (gbk_window_status (w), "Free space:"));
+  g_assert_nonnull (strstr (gbk_window_status (w), "3 folders · 1 file   "));
+  g_assert_true (g_str_has_suffix (gbk_window_status (w), " free"));
 
   /* Enter "sub" by activating it, like a double-click. */
   GbkView *v = gbk_window_view (w);
   gbk_view_select_only (v, gbk_dir_model_find (model_of (w), "sub"));
-  g_assert_nonnull (strstr (gbk_window_status (w), "\"sub\" folder"));
+  g_assert_true (g_str_has_prefix (gbk_window_status (w), "sub   "));   /* name, free space */
+  gbk_view_select_only (v, gbk_dir_model_find (model_of (w), "f.txt"));
+  g_assert_true (g_str_has_prefix (gbk_window_status (w), "f.txt  5 bytes   "));
+  gbk_view_select_all (v);
+  g_assert_true (g_str_has_prefix (gbk_window_status (w), "4 selected  5 bytes   "));
+  gbk_view_select_only (v, gbk_dir_model_find (model_of (w), "sub"));
   g_signal_emit_by_name (v, "activate");
   wait_at (w, sub);
   g_assert_nonnull (strstr (gbk_window_status (w), "2 files"));
@@ -141,16 +146,38 @@ test_navigation (void)
   /* The title is the full folder path, nothing else. */
   g_assert_cmpstr (gtk_window_get_title (GTK_WINDOW (w)), ==, root);
 
-  /* Ctrl+H, reflected on the right of the status bar. */
-  g_assert_cmpstr (gbk_window_modes (w), ==, "Sort: Name  |  Hidden files: Off");
+  /* Ctrl+H, reflected by the status bar's ".*" toggle; clicking the toggle works too. */
+  GtkToggleButton *hidden = gbk_window_hidden_button (w);
+  g_assert_false (gtk_toggle_button_get_active (hidden));
   size_t before = gbk_dir_model_n_visible (model_of (w));
   activate (w, "show-hidden");
   g_assert_cmpuint (gbk_dir_model_n_visible (model_of (w)), ==, before + 1);
-  g_assert_cmpstr (gbk_window_modes (w), ==, "Sort: Name  |  Hidden files: On");
-  activate (w, "show-hidden");
+  g_assert_true (gtk_toggle_button_get_active (hidden));
+  gtk_button_clicked (GTK_BUTTON (hidden));
   g_assert_cmpuint (gbk_dir_model_n_visible (model_of (w)), ==, before);
-  g_action_group_activate_action (G_ACTION_GROUP (w), "sort", g_variant_new_string ("modified"));
-  g_assert_cmpstr (gbk_window_modes (w), ==, "Sort: Date Modified  |  Hidden files: Off");
+  g_assert_false (gtk_toggle_button_get_active (hidden));
+  gtk_button_clicked (GTK_BUTTON (hidden));
+  g_assert_cmpuint (gbk_dir_model_n_visible (model_of (w)), ==, before + 1);
+  activate (w, "show-hidden");
+  g_assert_false (gtk_toggle_button_get_active (hidden));
+
+  /* The sort button shows the sort and cycles name -> modified -> size -> name. */
+  GtkButton *sort = gbk_window_sort_button (w);
+  g_assert_cmpstr (gtk_button_get_label (sort), ==, "↑Name");
+  gtk_button_clicked (sort);
+  g_assert_cmpstr (gtk_button_get_label (sort), ==, "↓Modified");
+  g_assert_cmpint (gbk_dir_model_sort (model_of (w)), ==, GBK_SORT_MTIME);
+  gtk_button_clicked (sort);
+  g_assert_cmpstr (gtk_button_get_label (sort), ==, "↓Size");
+  g_assert_cmpint (gbk_dir_model_sort (model_of (w)), ==, GBK_SORT_SIZE);
+  gtk_button_clicked (sort);
+  g_assert_cmpstr (gtk_button_get_label (sort), ==, "↑Name");
+  g_assert_cmpint (gbk_dir_model_sort (model_of (w)), ==, GBK_SORT_NAME);
+  /* The action (menus) updates the button; unknown values are ignored. */
+  g_action_group_activate_action (G_ACTION_GROUP (w), "sort", g_variant_new_string ("size"));
+  g_assert_cmpstr (gtk_button_get_label (sort), ==, "↓Size");
+  g_action_group_activate_action (G_ACTION_GROUP (w), "sort", g_variant_new_string ("bogus"));
+  g_assert_cmpint (gbk_dir_model_sort (model_of (w)), ==, GBK_SORT_SIZE);
   g_action_group_activate_action (G_ACTION_GROUP (w), "sort", g_variant_new_string ("name"));
 
   gtk_widget_destroy (GTK_WIDGET (w));
@@ -253,6 +280,33 @@ choose (GtkMenu *menu, const char *label)
   gbk_fatal ("no menu item \"%s\"", label);
 }
 
+/* A real right-button press on the path bar button for `path`, as the main loop delivers it.
+ * Returns the menu it opened. */
+static GtkMenu *
+right_click_bar (GbkWindow *w, const char *path)
+{
+  GtkWidget *button = gbk_pathbar_button (gbk_window_pathbar (w), path);
+  GdkEvent *ev = gdk_event_new (GDK_BUTTON_PRESS);
+  ev->button.window = g_object_ref (gtk_button_get_event_window (GTK_BUTTON (button)));
+  ev->button.button = GDK_BUTTON_SECONDARY;
+  ev->button.x = ev->button.y = 2;
+  ev->button.time = GDK_CURRENT_TIME;
+  gdk_event_set_device (ev, gdk_seat_get_pointer (
+      gdk_display_get_default_seat (gtk_widget_get_display (button))));
+  gtk_main_do_event (ev);
+  gdk_event_free (ev);
+  GList *menus = gtk_menu_get_for_attach_widget (GTK_WIDGET (gbk_window_pathbar (w)));
+  if (g_list_length (menus) != 1)
+    gbk_fatal ("expected one path bar menu, got %u", g_list_length (menus));
+  return menus->data;
+}
+
+static bool
+bar_menus_gone (void *data)
+{
+  return gtk_menu_get_for_attach_widget (data) == nullptr;
+}
+
 static bool
 menus_gone (void *data)
 {
@@ -314,8 +368,8 @@ test_context_menu (void)
   GtkMenu *menu = open_context_menu (w);
   g_autofree char *labels = menu_labels (menu);
   g_assert_cmpstr (labels, ==,
-                   "Paste|Copy Full Path|-|Open Terminal Here|-|Sort by Name|Sort by Date Modified|-|"
-                   "Show Hidden Files");
+                   "Paste|Copy Full Path|-|Open Terminal Here|-|Sort by Name|Sort by Date Modified|"
+                   "Sort by Size|-|Show Hidden Files");
   const char *first = gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0)));
   g_assert_cmpstr (first, ==, "a-old");
   choose (menu, "Sort by Date Modified");
@@ -367,6 +421,58 @@ test_context_menu (void)
   gtk_widget_destroy (GTK_WIDGET (w));
   while (gtk_events_pending ())
     gtk_main_iteration ();
+  rm_rf (root);
+}
+
+static void
+test_open_folder_elsewhere (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "x/", "y/", "f.txt", nullptr });
+  g_autofree char *x = g_build_filename (root, "x", nullptr);
+  g_autofree char *y = g_build_filename (root, "y", nullptr);
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+  GbkDirModel *m = model_of (w);
+
+  /* A folder's menu offers a new tab or window; a file's doesn't. */
+  gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (m, "x"));
+  GtkMenu *menu = open_context_menu (w);
+  g_autofree char *labels = menu_labels (menu);
+  g_assert_true (g_str_has_prefix (labels, "Open|Open in New Tab|Open in New Window|"));
+  choose (menu, "Open in New Tab");
+  g_assert_cmpint (gbk_window_n_tabs (w), ==, 2);
+  wait_at (w, x);                                  /* the new tab is shown */
+  g_assert_true (wait_until (menus_gone, w));
+
+  activate (w, "close-tab");
+  wait_at (w, root);
+  gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (model_of (w), "f.txt"));
+  menu = open_context_menu (w);
+  g_autofree char *file_labels = menu_labels (menu);
+  g_assert_null (strstr (file_labels, "New Tab"));
+  g_assert_null (strstr (file_labels, "New Window"));
+  gtk_menu_shell_deactivate (GTK_MENU_SHELL (menu));
+  g_assert_true (wait_until (menus_gone, w));
+
+  /* Two folders in new windows: one window each. */
+  GbkHandle both[] = { gbk_dir_model_find (model_of (w), "x"),
+                       gbk_dir_model_find (model_of (w), "y") };
+  gbk_view_set_selection (gbk_window_view (w), both, 2);
+  guint windows = g_list_length (gtk_application_get_windows (app));
+  choose (open_context_menu (w), "Open in New Window");
+  g_assert_cmpuint (g_list_length (gtk_application_get_windows (app)), ==, windows + 2);
+  g_assert_true (wait_until (menus_gone, w));
+  /* Newest first in the application's list. */
+  GList *wins = gtk_application_get_windows (app);
+  GbkWindow *wy = GBK_WINDOW (wins->data), *wx = GBK_WINDOW (wins->next->data);
+  wait_at (wx, x);
+  wait_at (wy, y);
+  gtk_widget_destroy (GTK_WIDGET (wx));
+  gtk_widget_destroy (GTK_WIDGET (wy));
+
+  gtk_widget_destroy (GTK_WIDGET (w));
   rm_rf (root);
 }
 
@@ -597,6 +703,30 @@ test_pathbar (void)
   wait_at (w, b);
   assert_bar (w, e1);
 
+  /* Right-click on a button: that folder's menu, without anything that would move or delete
+   * a folder the tab is inside. */
+  GtkWidget *bar_widget = GTK_WIDGET (gbk_window_pathbar (w));
+  GtkMenu *menu = right_click_bar (w, a);
+  g_autofree char *labels = menu_labels (menu);
+  g_assert_cmpstr (labels, ==, "Open|Open in New Tab|Open in New Window|Open Terminal Here|-|"
+                               "Copy|Paste Into Folder|Copy Full Path");
+  choose (menu, "Copy Full Path");
+  g_autofree char *copied = clipboard_text (w);
+  g_assert_cmpstr (copied, ==, a);
+  g_assert_true (wait_until (bar_menus_gone, bar_widget));
+
+  choose (right_click_bar (w, a), "Open in New Tab");
+  g_assert_cmpint (gbk_window_n_tabs (w), ==, 2);
+  wait_at (w, a);
+  activate (w, "close-tab");
+  wait_at (w, b);
+
+  choose (right_click_bar (w, a), "Open");
+  wait_at (w, a);
+  g_assert_cmpint (gbk_window_n_tabs (w), ==, 1);
+  gbk_pathbar_click (gbk_window_pathbar (w), b);
+  wait_at (w, b);
+
   /* Outside home: from the filesystem root. */
   gbk_window_open (w, "/usr");
   wait_at (w, "/usr");
@@ -787,6 +917,7 @@ main (int argc, char **argv)
   g_test_add_func ("/window/vanishing-directory", test_vanishing_directory);
   g_test_add_func ("/window/terminal-missing", test_terminal_missing);
   g_test_add_func ("/window/context-menu", test_context_menu);
+  g_test_add_func ("/window/open-folder-elsewhere", test_open_folder_elsewhere);
   g_test_add_func ("/window/file-operations", test_file_operations);
   g_test_add_func ("/window/job-outlives-window", test_job_outlives_window);
   g_test_add_func ("/window/pathbar", test_pathbar);
