@@ -52,7 +52,7 @@ program that won't start. On anything else, [build from source](#building).
 - **Create files and folders** from the right-click menu on empty space.
 - **Properties** (right-click menu or Alt+Enter): dates (modified, accessed, changed,
   created), size, owner, group, link target, and read / write / execute permissions you can
-  change with Apply. For scripts, the right-click menu also has an **Executable** check
+  change with Apply. For files, the right-click menu also has an **Executable** check
   item that switches execute permission on or off in one click.
 - **Copy, cut, paste, trash, delete and rename.** File operations run in the background,
   with a progress window and Skip / Replace / Keep Both choices on conflicts. The clipboard
