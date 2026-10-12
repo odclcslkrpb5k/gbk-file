@@ -14,6 +14,7 @@ struct _GbkWindow
   GbkContext *ctx;
   GtkNotebook *tabs;
   GtkLabel *status;
+  GtkWidget *status_bar;  /* event box: right-click gives the folder's (empty-space) menu */
   GtkButton *sort_button; /* status bar, right: shows the sort, click cycles it */
   GtkToggleButton *hidden_button;   /* status bar, right: ".*", bound to win.show-hidden */
 
@@ -841,8 +842,10 @@ popup_menu (GbkWindow *w, GbkBrowser *b, GPtrArray *items, GbkMenuTarget target,
   gtk_menu_attach_to_widget (GTK_MENU (menu), attach, nullptr);
   gbk_connect (G_OBJECT (menu), menu, "deactivate", G_CALLBACK (on_menu_deactivate), nullptr);
   /* A GtkMenu is its own toplevel: destroying the widget it's attached to doesn't destroy
-   * it. Tie it to that widget, or closing the window with a menu open leaks the menu. */
+   * it. Tie it to that widget, or closing the window with a menu open leaks the menu. And to
+   * its tab: KEY_BROWSER is borrowed, and `attach` (the status bar) can outlive the tab. */
   gbk_connect (G_OBJECT (menu), attach, "destroy", G_CALLBACK (on_attach_destroyed), menu);
+  gbk_connect (G_OBJECT (menu), b, "destroy", G_CALLBACK (on_attach_destroyed), menu);
   gtk_widget_show_all (menu);
   /* Keyboard-triggered menus come without an event; GTK needs one (for the grab), and the
    * key press being handled is it. */
@@ -855,18 +858,34 @@ popup_menu (GbkWindow *w, GbkBrowser *b, GPtrArray *items, GbkMenuTarget target,
                               GDK_GRAVITY_NORTH_WEST, trigger);
 }
 
+/* The folder's own menu, as for a click on empty space. */
+static void
+popup_background_menu (GbkWindow *w, GbkBrowser *b, GtkWidget *attach, GdkEvent *event)
+{
+  g_autoptr (GPtrArray) items = g_ptr_array_new_with_free_func ((GDestroyNotify) gbk_item_free);
+  g_ptr_array_add (items, gbk_item_new_dir (gbk_browser_path (b)));
+  popup_menu (w, b, items, GBK_MENU_ON_BACKGROUND, attach, event);
+}
+
 static void
 on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w)
 {
   GbkBrowser *b = browser_of (v);
   g_autoptr (GPtrArray) items = snapshot_selection (w, b);
-  GbkMenuTarget target = GBK_MENU_ON_ITEMS;
   if (items->len == 0)
-    {
-      target = GBK_MENU_ON_BACKGROUND;
-      g_ptr_array_add (items, gbk_item_new_dir (gbk_browser_path (b)));
-    }
-  popup_menu (w, b, items, target, GTK_WIDGET (v), event);
+    popup_background_menu (w, b, GTK_WIDGET (v), event);
+  else
+    popup_menu (w, b, items, GBK_MENU_ON_ITEMS, GTK_WIDGET (v), event);
+}
+
+/* Right-click on the status bar: the active tab's folder menu. */
+static gboolean
+on_status_bar_press (GtkWidget *bar, GdkEventButton *ev, GbkWindow *w)
+{
+  if (!gdk_event_triggers_context_menu ((GdkEvent *) ev))
+    return false;
+  popup_background_menu (w, active (w), bar, (GdkEvent *) ev);
+  return true;
 }
 
 /* Path bar buttons are folders: the current one and its ancestors (and, after going up,
@@ -1217,7 +1236,11 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
     }
   gbk_connect (G_OBJECT (w), w->sort_button, "clicked", G_CALLBACK (on_sort_button_clicked), w);
   gtk_box_pack_end (GTK_BOX (status_bar), modes, false, false, 0);
-  gtk_box_pack_start (GTK_BOX (box), status_bar, false, false, 0);
+  w->status_bar = gtk_event_box_new ();
+  gtk_container_add (GTK_CONTAINER (w->status_bar), status_bar);
+  gbk_connect (G_OBJECT (w), w->status_bar, "button-press-event",
+               G_CALLBACK (on_status_bar_press), w);
+  gtk_box_pack_start (GTK_BOX (box), w->status_bar, false, false, 0);
   gtk_container_add (GTK_CONTAINER (w), box);
 
   gbk_connect (G_OBJECT (w), w->tabs, "switch-page", G_CALLBACK (on_switch_page), w);
@@ -1260,6 +1283,12 @@ const char *
 gbk_window_status (GbkWindow *w)
 {
   return gtk_label_get_text (w->status);
+}
+
+GtkWidget *
+gbk_window_status_bar (GbkWindow *w)
+{
+  return w->status_bar;
 }
 
 GtkButton *

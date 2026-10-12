@@ -323,6 +323,10 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   overlay bar covered the bottom row). Width cache keyed by slot+gen is per MODEL: cleared
   in gbk_view_set_model (stale widths truncated "movies" to "m…s"). All mutation-checked.
 - Alt+Home = home folder (win.home).
+- Status bar right-click (user, 2026-10-12) = the active tab's background menu. Status bar
+  is wrapped in a GtkEventBox (visible window, so tests can target its GdkWindow). Every
+  context menu is now destroyed with its TAB too (KEY_BROWSER is borrowed; the status bar
+  outlives tabs) — mutation-checked by closing the tab with the menu open.
 - BUILT 2026-10-12 (user's choices: Apply button, no Ctrl+Shift+N, Executable on every
   regular file):
   * fileops: gbk_ops_create (mkdirat / openat O_EXCL|O_NOFOLLOW, never replaces),

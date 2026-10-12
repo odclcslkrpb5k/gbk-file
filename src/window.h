@@ -21,6 +21,8 @@ const char *gbk_window_status (GbkWindow *w);
 /* Right side of the status bar: the sort button (label "↑Name" etc.; click cycles name ->
  * modified -> size) and the ".*" hidden-files toggle. */
 GtkButton *gbk_window_sort_button (GbkWindow *w);
+/* The whole status bar (right-click: the folder's menu, as on empty space). */
+GtkWidget *gbk_window_status_bar (GbkWindow *w);
 GtkToggleButton *gbk_window_hidden_button (GbkWindow *w);
 int gbk_window_n_tabs (GbkWindow *w);
 GbkPathbar *gbk_window_pathbar (GbkWindow *w);

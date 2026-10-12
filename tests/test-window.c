@@ -596,6 +596,65 @@ test_scroll_extent (void)
   rm_rf (root);
 }
 
+static GtkMenu *
+right_click_status_bar (GbkWindow *w)
+{
+  GtkWidget *bar = gbk_window_status_bar (w);
+  GdkEvent *ev = gdk_event_new (GDK_BUTTON_PRESS);
+  ev->button.window = g_object_ref (gtk_widget_get_window (bar));
+  ev->button.button = GDK_BUTTON_SECONDARY;
+  ev->button.x = ev->button.y = 3;
+  ev->button.time = GDK_CURRENT_TIME;
+  gdk_event_set_device (ev, gdk_seat_get_pointer (
+      gdk_display_get_default_seat (gtk_widget_get_display (bar))));
+  gtk_main_do_event (ev);
+  gdk_event_free (ev);
+  GList *menus = gtk_menu_get_for_attach_widget (bar);
+  if (g_list_length (menus) != 1)
+    gbk_fatal ("expected one status bar menu, got %u", g_list_length (menus));
+  return menus->data;
+}
+
+static void
+test_status_bar_menu (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "sub/", "f.txt", nullptr });
+  g_autofree char *sub = g_build_filename (root, "sub", nullptr);
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+
+  /* The same menu as empty space, for the active tab's folder, even with a selection. */
+  gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (model_of (w), "f.txt"));
+  GtkMenu *menu = right_click_status_bar (w);
+  g_autofree char *labels = menu_labels (menu);
+  g_assert_cmpstr (labels, ==,
+                   "Create Folder…|Create File…|-|Paste|Copy Full Path|-|Open Terminal Here|-|"
+                   "Sort by Name|Sort by Date Modified|Sort by Size|-|Show Hidden Files|-|Properties…");
+  choose (menu, "Sort by Size");
+  g_assert_cmpint (gbk_dir_model_sort (model_of (w)), ==, GBK_SORT_SIZE);
+  GtkWidget *bar = gbk_window_status_bar (w);
+  g_assert_true (wait_until (bar_menus_gone, bar));
+
+  /* In a second tab, it's that tab's folder. */
+  gbk_window_new_tab (w, sub);
+  wait_at (w, sub);
+  choose (right_click_status_bar (w), "Copy Full Path");
+  g_autofree char *copied = clipboard_text (w);
+  g_assert_cmpstr (copied, ==, sub);
+  g_assert_true (wait_until (bar_menus_gone, bar));
+
+  /* The menu belongs to its tab: closing the tab takes the menu with it (the status bar
+   * stays, so being attached there isn't enough). */
+  right_click_status_bar (w);
+  activate (w, "close-tab");
+  g_assert_true (wait_until (bar_menus_gone, bar));
+
+  gtk_widget_destroy (GTK_WIDGET (w));
+  rm_rf (root);
+}
+
 /* ---- create, executable, properties ---- */
 
 /* The visible toplevel of `type` (with `title`, if given), or nullptr. */
@@ -1265,6 +1324,7 @@ main (int argc, char **argv)
   g_test_add_func ("/window/context-menu", test_context_menu);
   g_test_add_func ("/window/open-folder-elsewhere", test_open_folder_elsewhere);
   g_test_add_func ("/window/scroll-extent", test_scroll_extent);
+  g_test_add_func ("/window/status-bar-menu", test_status_bar_menu);
   g_test_add_func ("/window/create-executable-properties", test_create_executable_properties);
   g_test_add_func ("/window/file-operations", test_file_operations);
   g_test_add_func ("/window/job-outlives-window", test_job_outlives_window);
