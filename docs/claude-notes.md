@@ -315,5 +315,22 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   Refuses dirty tree; needs out/release/released == HEAD hash (written only after the full
   release gate passes; setup() deletes it on any rebuild, e.g. bench), else runs release.
   Checks binary --version == HEAD, then cp+rename (atomic) binary and data/gbk-file.desktop.in.
+- View scroll position is CONTENT-anchored (anchor_index/offset/end), restored by every
+  update_adjustment; only real scrolling (value-changed outside `adjusting`) records it.
+  Why: GtkScrolledWindow allocates the child once WITHOUT the hscrollbar, then with it, and
+  the transient layout (more rows, shorter content) clamped the pixel value -> couldn't
+  reach the end (user bug 2026-10-12). Overlay scrolling OFF for the view's scroller (an
+  overlay bar covered the bottom row). Width cache keyed by slot+gen is per MODEL: cleared
+  in gbk_view_set_model (stale widths truncated "movies" to "m…s"). All mutation-checked.
+- Alt+Home = home folder (win.home).
+- NEXT (user decided 2026-10-12):
+  * Create Folder… / Create File… at top of background menu; name dialog prefilled
+    "New Folder"/"New File" (auto "(1)" if taken); typed name that exists -> error, never
+    overwrite; job on worker; select new item. NO Ctrl+Shift+N (user doesn't use it).
+  * Properties… (menu + Alt+Enter), single item incl. current folder: name, path, type,
+    size (no recursive), symlink target, mtime/atime/ctime/btime (statx), owner/group,
+    rwx grid + octal. APPLY BUTTON (user's choice, not immediate). stat/chmod on worker.
+  * "Executable" check item in the item menu for EVERY regular file (user's choice), multi
+    selection OK; on = +x where r is set, off = clear all x.
 - Not built yet (proposed 2026-10-11): New Folder/New File, rubber-band selection, drag and
   drop (ask user if they use it), remember window size, parallel statx.

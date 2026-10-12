@@ -175,6 +175,30 @@ test_layout (Fixture *f, const void *data G_GNUC_UNUSED)
   g_assert_cmpuint (gbk_view_item_at (f->view, 5, 100000), ==, GBK_HANDLE_NONE);
 }
 
+/* Width caches are per model: slot numbers restart in each one, so a new folder must not
+ * inherit the widths measured for the previous folder's names ("movies" drawn as "m…s"). */
+static void
+test_widths_follow_model (Fixture *f, const void *data G_GNUC_UNUSED)
+{
+  const char *long_name = "movies-and-other-long-named-things";
+  g_autoptr (GbkDirModel) m = gbk_dir_model_new_detached (types);
+  GbkScanMsg *s = msg (GBK_SCAN_CHUNK);
+  s->first = s->last = true;
+  g_ptr_array_add (s->upserts, mk (long_name, GBK_KIND_REGULAR));
+  gbk_dir_model_apply_for_test (m, s);
+  /* Slot 0 of the fixture's model is "Dir A", whose width is cached by now. */
+  gbk_view_set_model (f->view, m);
+  flush ();
+  GbkHandle only = gbk_dir_model_visible_handle (m, 0);
+  /* Its column is as wide as its name: an x well past "Dir A"'s width still hits it. */
+  int name_w = 0, h;
+  PangoLayout *l = gtk_widget_create_pango_layout (GTK_WIDGET (f->view), long_name);
+  pango_layout_get_pixel_size (l, &name_w, &h);
+  g_object_unref (l);
+  g_assert_cmpuint (gbk_view_item_at (f->view, 16 + name_w, 2), ==, only);
+  gbk_view_set_model (f->view, f->model);
+}
+
 static void
 test_keyboard (Fixture *f, const void *data G_GNUC_UNUSED)
 {
@@ -355,6 +379,7 @@ main (int argc, char **argv)
   types = gbk_type_builder_finish (b);
 
   ADD ("/view/layout", test_layout, 30, 500, 160);
+  ADD ("/view/widths-follow-model", test_widths_follow_model, 30, 500, 160);
   ADD ("/view/keyboard", test_keyboard, 30, 500, 160);
   ADD ("/view/mouse", test_mouse, 30, 500, 160);
   ADD ("/view/type-ahead", test_type_ahead, 30, 500, 160);

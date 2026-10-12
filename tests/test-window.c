@@ -162,6 +162,12 @@ test_navigation (void)
   activate (w, "forward");                      /* nothing forward: no-op */
   wait_at (w, root);
 
+  /* Alt+Home: the home folder. */
+  activate (w, "home");
+  wait_at (w, g_get_home_dir ());
+  activate (w, "back");
+  wait_at (w, root);
+
   /* The mouse's side buttons (8 back, 9 forward), over the files and over a path bar
    * button, which would otherwise take the press itself. */
   mouse_button (gtk_widget_get_window (GTK_WIDGET (gbk_window_view (w))), 8);
@@ -503,6 +509,79 @@ test_open_folder_elsewhere (void)
   wait_at (wy, y);
   gtk_widget_destroy (GTK_WIDGET (wx));
   gtk_widget_destroy (GTK_WIDGET (wy));
+
+  gtk_widget_destroy (GTK_WIDGET (w));
+  rm_rf (root);
+}
+
+/* Let GTK finish (re)allocating: scrollbars appearing take more than one pass. */
+static void
+settle (void)
+{
+  for (int i = 0; i < 30; i++)
+    {
+      while (gtk_events_pending ())
+        gtk_main_iteration ();
+      g_usleep (2000);
+    }
+}
+
+static void
+test_scroll_extent (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  GRand *r = g_rand_new_with_seed (7);
+  for (int i = 0; i < 600; i++)
+    {
+      GString *n = g_string_new ("");
+      g_string_append_printf (n, "%03d-", i);
+      for (int k = g_rand_int_range (r, 3, 40); k > 0; k--)
+        g_string_append_c (n, (char) ('a' + g_rand_int_range (r, 0, 26)));
+      g_autofree char *p = g_build_filename (root, n->str, nullptr);
+      g_assert_true (g_file_set_contents (p, "x", 1, nullptr));
+      g_string_free (n, true);
+    }
+  g_rand_free (r);
+
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_window_resize (GTK_WINDOW (w), 640, 300);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+  settle ();
+  GbkView *v = gbk_window_view (w);
+  GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW (gtk_widget_get_parent (GTK_WIDGET (v)));
+  GtkAdjustment *adj = gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (v));
+
+  /* The scrollbar has its own space: it doesn't cover the bottom row. */
+  GtkAllocation va, sa, ha;
+  gtk_widget_get_allocation (GTK_WIDGET (v), &va);
+  gtk_widget_get_allocation (GTK_WIDGET (sw), &sa);
+  gtk_widget_get_allocation (gtk_scrolled_window_get_hscrollbar (sw), &ha);
+  g_assert_true (gtk_widget_get_visible (gtk_scrolled_window_get_hscrollbar (sw)));
+  g_assert_cmpint (va.height + ha.height, <=, sa.height);
+
+  /* Dragged to the far end, it stays at the very end (GTK's passing layouts without the
+   * scrollbar used to clamp it short), and still after the window changes size. */
+  gtk_adjustment_set_value (adj, gtk_adjustment_get_upper (adj));
+  settle ();
+  g_assert_cmpfloat (gtk_adjustment_get_value (adj), ==,
+                     gtk_adjustment_get_upper (adj) - gtk_adjustment_get_page_size (adj));
+  gtk_window_resize (GTK_WINDOW (w), 600, 360);
+  settle ();
+  g_assert_cmpfloat (gtk_adjustment_get_value (adj), ==,
+                     gtk_adjustment_get_upper (adj) - gtk_adjustment_get_page_size (adj));
+
+  /* In the middle, the same files stay at the left edge when the height changes. */
+  gtk_adjustment_set_value (adj, gtk_adjustment_get_upper (adj) / 2);
+  settle ();
+  GbkHandle left = gbk_view_item_at (v, 1, 1);
+  g_assert_cmpuint (left, !=, GBK_HANDLE_NONE);
+  gtk_window_resize (GTK_WINDOW (w), 600, 260);
+  settle ();
+  g_assert_cmpuint (gbk_view_rows_per_column (v), >, 0);
+  size_t rows = gbk_view_rows_per_column (v);
+  size_t want = gbk_dir_model_visible_index (model_of (w), left) / rows * rows;
+  g_assert_cmpuint (gbk_view_item_at (v, 1, 1), ==, gbk_dir_model_visible_handle (model_of (w), want));
 
   gtk_widget_destroy (GTK_WIDGET (w));
   rm_rf (root);
@@ -950,6 +1029,7 @@ main (int argc, char **argv)
   g_test_add_func ("/window/terminal-missing", test_terminal_missing);
   g_test_add_func ("/window/context-menu", test_context_menu);
   g_test_add_func ("/window/open-folder-elsewhere", test_open_folder_elsewhere);
+  g_test_add_func ("/window/scroll-extent", test_scroll_extent);
   g_test_add_func ("/window/file-operations", test_file_operations);
   g_test_add_func ("/window/job-outlives-window", test_job_outlives_window);
   g_test_add_func ("/window/pathbar", test_pathbar);

@@ -816,6 +816,7 @@ on_pathbar_menu (GbkPathbar *bar, const char *path, GdkEvent *event, GbkWindow *
 ACTION (action_back) { gbk_browser_back (active (data)); }
 ACTION (action_forward) { gbk_browser_forward (active (data)); }
 ACTION (action_up) { gbk_browser_up (active (data)); }
+ACTION (action_home) { gbk_browser_open (active (data), g_get_home_dir ()); }
 
 ACTION (action_terminal)
 {
@@ -905,6 +906,7 @@ static const GActionEntry actions[] = {
   { .name = "back", .activate = action_back },
   { .name = "forward", .activate = action_forward },
   { .name = "up", .activate = action_up },
+  { .name = "home", .activate = action_home },
   { .name = "terminal", .activate = action_terminal },
   { .name = "copy", .activate = action_copy },
   { .name = "cut", .activate = action_cut },
@@ -934,6 +936,7 @@ static const struct
   { "win.back", { "<Alt>Left", nullptr } },
   { "win.forward", { "<Alt>Right", nullptr } },
   { "win.up", { "<Alt>Up", nullptr } },
+  { "win.home", { "<Alt>Home", nullptr } },
   { "win.show-hidden", { "<Control>h", nullptr } },
   { "win.terminal", { "F4", nullptr } },
   { "win.close-tab", { "<Control>w", nullptr } },

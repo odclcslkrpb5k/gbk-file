@@ -29,6 +29,15 @@ struct _GbkView
 
   GtkAdjustment *hadj, *vadj;
   gulong hadj_changed_id;
+  /* Scroll position as content, not pixels: the item at the top of the leftmost visible
+   * column and how far into that column, or "at the far end". Every layout restores it, so
+   * a passing layout (GTK allocates once without the scrollbar, then with it) or a resize
+   * can't move what's on screen. Updated only by real scrolling, never by our own
+   * reconfiguring (`adjusting`). */
+  size_t anchor_index;
+  int anchor_offset;
+  bool anchor_end;
+  bool adjusting;
   guint hscroll_policy, vscroll_policy;
 
   /* Metrics (style_updated). */
@@ -39,7 +48,8 @@ struct _GbkView
   /* Layout (relayout). */
   size_t rows;
   GArray *col_x;                /* int: start x of each column, plus the total at the end */
-  GArray *widths;               /* WidthCache, indexed by model slot */
+  GArray *widths;               /* WidthCache, indexed by model slot: valid for `model` only
+                                 * (slots and generations restart in every model) */
 
   /* Selection. */
   GHashTable *selected;         /* GbkHandle set */
@@ -198,6 +208,8 @@ max_column_width (GbkView *v)
 
 /* ---- layout ---- */
 
+static size_t column_at (GbkView *v, int cx);
+
 static void
 update_adjustment (GbkView *v)
 {
@@ -205,8 +217,42 @@ update_adjustment (GbkView *v)
     return;
   double page = gtk_widget_get_allocated_width (GTK_WIDGET (v));
   double upper = MAX (content_width (v), page);
-  double value = CLAMP (gtk_adjustment_get_value (v->hadj), 0, upper - page);
+  double value = 0;
+  size_t c = v->rows > 0 ? v->anchor_index / v->rows : 0;
+  if (v->anchor_end)
+    value = upper - page;
+  else if (c < n_columns (v))
+    value = col_start (v, c) + MIN (v->anchor_offset, col_start (v, c + 1) - col_start (v, c));
+  value = CLAMP (value, 0, upper - page);
+  v->adjusting = true;
   gtk_adjustment_configure (v->hadj, value, 0, upper, v->row_h * 2, page * 0.9, page);
+  v->adjusting = false;
+}
+
+/* After the user (or scroll_to_index) moved the scroll position: remember it as content. */
+static void
+record_anchor (GbkView *v)
+{
+  double value = gtk_adjustment_get_value (v->hadj);
+  double upper = gtk_adjustment_get_upper (v->hadj), page = gtk_adjustment_get_page_size (v->hadj);
+  v->anchor_end = upper > page && value >= upper - page - 0.5;
+  if (n_columns (v) == 0)
+    {
+      v->anchor_index = 0;
+      v->anchor_offset = 0;
+      return;
+    }
+  size_t c = column_at (v, (int) value);
+  v->anchor_index = c * v->rows;
+  v->anchor_offset = (int) value - col_start (v, c);
+}
+
+static void
+reset_anchor (GbkView *v)
+{
+  v->anchor_index = 0;
+  v->anchor_offset = 0;
+  v->anchor_end = false;
 }
 
 static void
@@ -643,8 +689,9 @@ gbk_view_set_model (GbkView *v, GbkDirModel *model)
   v->cursor = v->anchor = GBK_HANDLE_NONE;
   v->cursor_hint = 0;
   search_clear (v);
-  if (v->hadj != nullptr)
-    gtk_adjustment_set_value (v->hadj, 0);
+  reset_anchor (v);
+  /* Cached widths are keyed by slot and generation, which restart in every model. */
+  g_array_set_size (v->widths, 0);
 
   if (model != nullptr)
     {
@@ -1010,6 +1057,8 @@ gbk_view_style_updated (GtkWidget *w)
 static void
 on_hadj_changed (GtkAdjustment *adj G_GNUC_UNUSED, GbkView *v)
 {
+  if (!v->adjusting)
+    record_anchor (v);
   gtk_widget_queue_draw (GTK_WIDGET (v));
 }
 

@@ -436,6 +436,9 @@ gbk_browser_new (GbkContext *ctx, bool show_hidden, GbkSortMode sort)
   GtkWidget *scroller = gtk_scrolled_window_new (nullptr, nullptr);
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroller), GTK_POLICY_AUTOMATIC,
                                   GTK_POLICY_NEVER);
+  /* An overlay scrollbar would sit on the bottom row of items (the view fills its height
+   * with rows); a real one takes its own space. */
+  gtk_scrolled_window_set_overlay_scrolling (GTK_SCROLLED_WINDOW (scroller), false);
   b->view = GBK_VIEW (gbk_view_new (ctx->types));
   gtk_container_add (GTK_CONTAINER (scroller), GTK_WIDGET (b->view));
   gtk_box_pack_start (GTK_BOX (b), scroller, true, true, 0);

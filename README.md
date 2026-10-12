@@ -72,6 +72,8 @@ program that won't start. On anything else, [build from source](#building).
 | Typing | Jump to the first name starting with what you typed |
 | Enter | Open |
 | Alt+Left / Alt+Right / Alt+Up | Back / forward / parent folder |
+| Alt+Home | Home folder |
+| Mouse back / forward buttons | Back / forward |
 | Ctrl+H | Show or hide hidden files |
 | Ctrl+L | Type a location |
 | F4 | Open a terminal here |
