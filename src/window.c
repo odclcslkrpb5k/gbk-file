@@ -19,6 +19,8 @@ struct _GbkWindow
   bool show_hidden;       /* window-wide: applies to every tab */
   GbkSortMode sort;
   char *paste_dest;       /* destination of the paste request in flight */
+  GtkGesture *mouse_back;     /* mouse buttons 8/9, caught before any child sees them */
+  GtkGesture *mouse_forward;
 };
 
 G_DEFINE_FINAL_TYPE (GbkWindow, gbk_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -973,7 +975,47 @@ gbk_window_key_press (GtkWidget *widget, GdkEventKey *ev)
   return GTK_WIDGET_CLASS (gbk_window_parent_class)->key_press_event (widget, ev);
 }
 
+/* ---- mouse back / forward buttons ---- */
+
+static void
+on_mouse_back (GtkGestureMultiPress *g, int n_press G_GNUC_UNUSED, double x G_GNUC_UNUSED,
+               double y G_GNUC_UNUSED, GbkWindow *w)
+{
+  gtk_gesture_set_state (GTK_GESTURE (g), GTK_EVENT_SEQUENCE_CLAIMED);
+  gbk_browser_back (active (w));
+}
+
+static void
+on_mouse_forward (GtkGestureMultiPress *g, int n_press G_GNUC_UNUSED, double x G_GNUC_UNUSED,
+                  double y G_GNUC_UNUSED, GbkWindow *w)
+{
+  gtk_gesture_set_state (GTK_GESTURE (g), GTK_EVENT_SEQUENCE_CLAIMED);
+  gbk_browser_forward (active (w));
+}
+
+/* X11 reports a mouse's back and forward side buttons as buttons 8 and 9. The capture
+ * phase sees them first, whatever is under the pointer (files, path bar, status bar). */
+static GtkGesture *
+side_button (GbkWindow *w, guint button, GCallback fn)
+{
+  GtkGesture *g = gtk_gesture_multi_press_new (GTK_WIDGET (w));
+  gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (g), button);
+  gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (g), GTK_PHASE_CAPTURE);
+  gbk_connect (G_OBJECT (w), g, "pressed", fn, w);
+  return g;
+}
+
 /* ---- GObject ---- */
+
+static void
+gbk_window_dispose (GObject *o)
+{
+  GbkWindow *w = GBK_WINDOW (o);
+  /* Gestures aren't owned by their widget in GTK 3: release them while it's still whole. */
+  g_clear_object (&w->mouse_back);
+  g_clear_object (&w->mouse_forward);
+  G_OBJECT_CLASS (gbk_window_parent_class)->dispose (o);
+}
 
 static void
 gbk_window_finalize (GObject *o)
@@ -987,6 +1029,7 @@ gbk_window_finalize (GObject *o)
 static void
 gbk_window_class_init (GbkWindowClass *klass)
 {
+  G_OBJECT_CLASS (klass)->dispose = gbk_window_dispose;
   G_OBJECT_CLASS (klass)->finalize = gbk_window_finalize;
   GTK_WIDGET_CLASS (klass)->key_press_event = gbk_window_key_press;
 }
@@ -1085,6 +1128,8 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   gtk_container_add (GTK_CONTAINER (w), box);
 
   gbk_connect (G_OBJECT (w), w->tabs, "switch-page", G_CALLBACK (on_switch_page), w);
+  w->mouse_back = side_button (w, 8, G_CALLBACK (on_mouse_back));
+  w->mouse_forward = side_button (w, 9, G_CALLBACK (on_mouse_forward));
   gbk_connect (G_OBJECT (w), w->tabs, "page-removed", G_CALLBACK (on_page_removed), w);
 
   set_show_hidden (w, w->show_hidden);

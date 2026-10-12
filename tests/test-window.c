@@ -102,6 +102,25 @@ activate (GbkWindow *w, const char *action)
   g_action_group_activate_action (G_ACTION_GROUP (w), action, nullptr);
 }
 
+/* A real mouse button press and release on `win`, as the main loop delivers them. */
+static void
+mouse_button (GdkWindow *win, guint button)
+{
+  GdkEventType types[] = { GDK_BUTTON_PRESS, GDK_BUTTON_RELEASE };
+  for (size_t i = 0; i < G_N_ELEMENTS (types); i++)
+    {
+      GdkEvent *ev = gdk_event_new (types[i]);
+      ev->button.window = g_object_ref (win);
+      ev->button.button = button;
+      ev->button.x = ev->button.y = 3;
+      ev->button.time = GDK_CURRENT_TIME;
+      gdk_event_set_device (ev, gdk_seat_get_pointer (
+          gdk_display_get_default_seat (gdk_window_get_display (win))));
+      gtk_main_do_event (ev);
+      gdk_event_free (ev);
+    }
+}
+
 static void
 test_navigation (void)
 {
@@ -141,6 +160,19 @@ test_navigation (void)
   activate (w, "forward");
   wait_at (w, root);
   activate (w, "forward");                      /* nothing forward: no-op */
+  wait_at (w, root);
+
+  /* The mouse's side buttons (8 back, 9 forward), over the files and over a path bar
+   * button, which would otherwise take the press itself. */
+  mouse_button (gtk_widget_get_window (GTK_WIDGET (gbk_window_view (w))), 8);
+  wait_at (w, sub);
+  mouse_button (gtk_widget_get_window (GTK_WIDGET (gbk_window_view (w))), 9);
+  wait_at (w, root);
+  GtkWidget *crumb = gbk_pathbar_button (gbk_window_pathbar (w), root);
+  mouse_button (gtk_button_get_event_window (GTK_BUTTON (crumb)), 8);
+  wait_at (w, sub);
+  crumb = gbk_pathbar_button (gbk_window_pathbar (w), sub);
+  mouse_button (gtk_button_get_event_window (GTK_BUTTON (crumb)), 9);
   wait_at (w, root);
 
   /* The title is the full folder path, nothing else. */

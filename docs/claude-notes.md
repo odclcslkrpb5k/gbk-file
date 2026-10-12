@@ -271,6 +271,10 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   KEY ROUTING: while a GtkEditable has focus, keys go to it and window shortcuts DON'T run
   (otherwise Delete/Ctrl+V/F2 in the location bar act on files). Tested both ways.
   Several folders activated -> new tabs. Trash: no confirmation; Shift+Delete confirms.
+- Mouse side buttons (user, 2026-10-12): buttons 8/9 = back/forward via two
+  GtkGestureMultiPress on the window in CAPTURE phase (children like path bar buttons can't
+  swallow them). GTK3 gestures aren't owned by the widget: unref'd in window dispose.
+  Test sends real press/release to the view and to a path bar button (mutation-checked).
 - Title bar = full path of the active folder, nothing else (user, 2026-10-11).
 - Status bar (user mockup, 2026-10-12): left "4 folders · 6 files   13.1 GiB free",
   "name  28.6 KiB   … free", "3 selected  41.2 KiB   … free". Right: small buttons, never
