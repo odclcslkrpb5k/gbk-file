@@ -62,3 +62,36 @@ bool gbk_ops_valid_name (const char *name, GError **error);
 
 /* "name (1).ext" style alternative for `name` that doesn't exist in `dir`. */
 [[nodiscard]] char *gbk_ops_free_name (const char *dir, const char *name);
+/* Pure: the n-th alternative for `name`: "a.txt" -> "a (n).txt", "x.tar.gz" -> "x (n).tar.gz",
+ * ".bashrc" -> ".bashrc (n)". */
+[[nodiscard]] char *gbk_ops_numbered_name (const char *name, unsigned n);
+
+/* Create an empty file or folder `name` in `dir`. Never replaces anything: an existing
+ * name fails with G_IO_ERROR_EXISTS. Permissions follow the umask (0666 / 0777). */
+bool gbk_ops_create (const char *dir, const char *name, bool folder, GError **error);
+
+/* Turn execute permission on (for owner/group/others wherever they have read) or off
+ * (for everyone). `path` must be, or link to, a regular file. */
+bool gbk_ops_set_executable (const char *path, bool executable, GError **error);
+
+/* Set the rwx bits (0777) of `path` (following a symlink); setuid/setgid/sticky are kept. */
+bool gbk_ops_set_permissions (const char *path, uint32_t rwx, GError **error);
+
+/* What the Properties window shows. For a symlink, everything but `link_target` describes
+ * what it points to (a link's own permissions mean nothing), unless it dangles. */
+typedef struct
+{
+  bool symlink;
+  char *link_target;       /* symlinks only; raw bytes */
+  bool dangling;           /* symlink whose target can't be read */
+  uint32_t mode;           /* st_mode: type and permission bits */
+  uint64_t size;
+  uint32_t uid, gid;
+  char *owner, *group;     /* names, or nullptr when unknown */
+  int64_t atime_ns, mtime_ns, ctime_ns, btime_ns;
+  bool has_btime;          /* the filesystem records creation time */
+} GbkFileInfo;
+
+[[nodiscard]] GbkFileInfo *gbk_ops_info (const char *path, GError **error);
+void gbk_file_info_free (GbkFileInfo *info);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (GbkFileInfo, gbk_file_info_free)

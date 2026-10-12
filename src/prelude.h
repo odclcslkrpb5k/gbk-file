@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <limits.h>
 #include <malloc.h>
 #include <math.h>
@@ -21,6 +22,7 @@
 #include <string.h>
 #include <poll.h>
 #include <pthread.h>
+#include <pwd.h>
 #include <sys/eventfd.h>
 #include <sys/inotify.h>
 #include <sys/syscall.h>

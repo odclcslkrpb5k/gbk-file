@@ -21,6 +21,7 @@ typedef struct
   char *display;        /* UTF-8, for messages */
   char *mime;
   bool is_dir;
+  bool regular;         /* regular file (or a symlink to one) */
   bool executable;      /* regular file with an exec bit */
   bool script;          /* extension listed in [Interpreters] */
 } GbkItem;

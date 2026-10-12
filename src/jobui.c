@@ -25,10 +25,16 @@ verb (GbkJob *job)
 {
   switch (gbk_job_kind (job))
     {
-    case GBK_OP_COPY: return "Copying";
-    case GBK_OP_MOVE: return "Moving";
-    case GBK_OP_TRASH: return "Moving to Trash";
-    case GBK_OP_DELETE: return "Deleting";
+    case GBK_JOB_COPY: return "Copying";
+    case GBK_JOB_MOVE: return "Moving";
+    case GBK_JOB_TRASH: return "Moving to Trash";
+    case GBK_JOB_DELETE: return "Deleting";
+    case GBK_JOB_RENAME: return "Renaming";
+    case GBK_JOB_CREATE_FILE: return "Creating File";
+    case GBK_JOB_CREATE_FOLDER: return "Creating Folder";
+    case GBK_JOB_SET_EXECUTABLE: case GBK_JOB_CLEAR_EXECUTABLE: case GBK_JOB_PERMISSIONS:
+      return "Changing Permissions";
+    case GBK_JOB_INFO: return "Reading Details";
     default: return "Working";
     }
 }

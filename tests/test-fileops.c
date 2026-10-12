@@ -358,6 +358,143 @@ test_free_name (void)
 }
 
 static void
+test_numbered_name (void)
+{
+  const char *cases[][2] = {
+    { "a.txt", "a (3).txt" }, { "x.tar.gz", "x (3).tar.gz" }, { ".bashrc", ".bashrc (3)" },
+    { "New Folder", "New Folder (3)" }, { "", " (3)" }, { "a.", "a (3)." },
+  };
+  for (size_t i = 0; i < G_N_ELEMENTS (cases); i++)
+    {
+      g_autofree char *got = gbk_ops_numbered_name (cases[i][0], 3);
+      g_assert_cmpstr (got, ==, cases[i][1]);
+    }
+}
+
+static mode_t
+mode_of (const char *rel)
+{
+  g_autofree char *p = P (rel);
+  struct stat st;
+  g_assert_cmpint (lstat (p, &st), ==, 0);
+  return st.st_mode;
+}
+
+static void
+test_create (void)
+{
+  mode_t mask = umask (022);
+  umask (mask);
+  mk ("c/", nullptr);
+  g_autofree char *dir = P ("c");
+  g_assert_true (gbk_ops_create (dir, "New Folder", true, nullptr));
+  g_assert_true (S_ISDIR (mode_of ("c/New Folder")));
+  g_assert_cmpint (mode_of ("c/New Folder") & 0777, ==, 0777 & ~mask);
+  g_assert_true (gbk_ops_create (dir, "New File", false, nullptr));
+  g_assert_true (S_ISREG (mode_of ("c/New File")));
+  g_assert_cmpint (mode_of ("c/New File") & 0777, ==, 0666 & ~mask);
+  assert_content ("c/New File", "");
+
+  /* Never replaces anything: file, folder or symlink. */
+  mk ("c/keep.txt", "precious");
+  g_autoptr (GError) e1 = nullptr;
+  g_assert_false (gbk_ops_create (dir, "keep.txt", false, &e1));
+  g_assert_error (e1, G_IO_ERROR, G_IO_ERROR_EXISTS);
+  assert_content ("c/keep.txt", "precious");
+  g_autoptr (GError) e2 = nullptr;
+  g_assert_false (gbk_ops_create (dir, "New Folder", true, &e2));
+  g_assert_error (e2, G_IO_ERROR, G_IO_ERROR_EXISTS);
+  g_autofree char *link = P ("c/link");
+  g_assert_cmpint (symlink ("elsewhere", link), ==, 0);
+  g_autoptr (GError) e3 = nullptr;
+  g_assert_false (gbk_ops_create (dir, "link", false, &e3));
+  g_assert_false (exists ("c/elsewhere"));        /* didn't create through the link */
+
+  g_autoptr (GError) e4 = nullptr;
+  g_assert_false (gbk_ops_create (dir, "a/b", false, &e4));
+  g_assert_error (e4, G_IO_ERROR, G_IO_ERROR_INVALID_FILENAME);
+}
+
+static void
+test_permissions (void)
+{
+  mk ("p/s.sh", "#!/bin/sh\n");
+  g_autofree char *f = P ("p/s.sh");
+  g_assert_cmpint (chmod (f, 0640), ==, 0);
+  /* On: execute wherever there's read. Off: no execute anywhere. */
+  g_assert_true (gbk_ops_set_executable (f, true, nullptr));
+  g_assert_cmpint (mode_of ("p/s.sh") & 07777, ==, 0750);
+  g_assert_true (gbk_ops_set_executable (f, true, nullptr));      /* already: no change */
+  g_assert_cmpint (mode_of ("p/s.sh") & 07777, ==, 0750);
+  g_assert_cmpint (chmod (f, 0711), ==, 0);
+  g_assert_true (gbk_ops_set_executable (f, false, nullptr));
+  g_assert_cmpint (mode_of ("p/s.sh") & 07777, ==, 0600);
+
+  /* Through a symlink: the target changes. Folders aren't "executable" files. */
+  g_autofree char *link = P ("p/link");
+  g_assert_cmpint (symlink ("s.sh", link), ==, 0);
+  g_assert_true (gbk_ops_set_executable (link, true, nullptr));
+  g_assert_cmpint (mode_of ("p/s.sh") & 0777, ==, 0700);
+  mk ("p/d/", nullptr);
+  g_autofree char *d = P ("p/d");
+  g_autoptr (GError) e = nullptr;
+  g_assert_false (gbk_ops_set_executable (d, true, &e));
+  g_assert_error (e, G_IO_ERROR, G_IO_ERROR_NOT_REGULAR_FILE);
+
+  /* rwx bits only: setgid survives. */
+  g_assert_cmpint (chmod (d, 02755), ==, 0);
+  g_assert_true (gbk_ops_set_permissions (d, 0700, nullptr));
+  g_assert_cmpint (mode_of ("p/d") & 07777, ==, 02700);
+  g_autofree char *gone = P ("p/gone");
+  g_autoptr (GError) e2 = nullptr;
+  g_assert_false (gbk_ops_set_permissions (gone, 0644, &e2));
+  g_assert_error (e2, G_IO_ERROR, G_IO_ERROR_NOT_FOUND);
+}
+
+static void
+test_info (void)
+{
+  mk ("i/f.txt", "hello");
+  g_autofree char *f = P ("i/f.txt");
+  g_assert_cmpint (chmod (f, 0640), ==, 0);
+  struct timespec ts[2] = { { .tv_sec = 1000000000, .tv_nsec = 5 }, { .tv_sec = 1500000000, .tv_nsec = 7 } };
+  g_assert_cmpint (utimensat (AT_FDCWD, f, ts, 0), ==, 0);
+  g_autoptr (GbkFileInfo) i = gbk_ops_info (f, nullptr);
+  g_assert_nonnull (i);
+  g_assert_false (i->symlink);
+  g_assert_true (S_ISREG (i->mode));
+  g_assert_cmpint (i->mode & 0777, ==, 0640);
+  g_assert_cmpuint (i->size, ==, 5);
+  g_assert_cmpint (i->atime_ns, ==, INT64_C (1000000000000000005));
+  g_assert_cmpint (i->mtime_ns, ==, INT64_C (1500000000000000007));
+  g_assert_cmpuint (i->uid, ==, geteuid ());
+  g_assert_cmpuint (i->gid, ==, getegid ());
+
+  /* A symlink: its target, plus where it points. */
+  g_autofree char *link = P ("i/link");
+  g_assert_cmpint (symlink ("f.txt", link), ==, 0);
+  g_autoptr (GbkFileInfo) l = gbk_ops_info (link, nullptr);
+  g_assert_true (l->symlink);
+  g_assert_false (l->dangling);
+  g_assert_cmpstr (l->link_target, ==, "f.txt");
+  g_assert_true (S_ISREG (l->mode));
+  g_assert_cmpuint (l->size, ==, 5);
+
+  /* Dangling: the link itself. */
+  g_autofree char *bad = P ("i/bad");
+  g_assert_cmpint (symlink ("nowhere", bad), ==, 0);
+  g_autoptr (GbkFileInfo) b = gbk_ops_info (bad, nullptr);
+  g_assert_true (b->dangling);
+  g_assert_true (S_ISLNK (b->mode));
+  g_assert_cmpstr (b->link_target, ==, "nowhere");
+
+  g_autofree char *gone = P ("i/gone");
+  g_autoptr (GError) e = nullptr;
+  g_assert_null (gbk_ops_info (gone, &e));
+  g_assert_error (e, G_IO_ERROR, G_IO_ERROR_NOT_FOUND);
+}
+
+static void
 fresh_root (void)
 {
   /* Each test gets its own directory under the session root. */
@@ -382,6 +519,10 @@ WRAP (test_trash)
 WRAP (test_errors_and_cancel)
 WRAP (test_rename)
 WRAP (test_free_name)
+WRAP (test_numbered_name)
+WRAP (test_create)
+WRAP (test_permissions)
+WRAP (test_info)
 
 int
 main (int argc, char **argv)
@@ -394,6 +535,10 @@ main (int argc, char **argv)
   g_setenv ("GBK_TEST_ROOT", session, true);
 
   g_test_init (&argc, &argv, nullptr);
+  ADD ("/fileops/numbered-name", test_numbered_name);
+  ADD ("/fileops/create", test_create);
+  ADD ("/fileops/permissions", test_permissions);
+  ADD ("/fileops/info", test_info);
   ADD ("/fileops/copy-tree", test_copy_tree);
   ADD ("/fileops/copy-conflicts", test_copy_conflicts);
   ADD ("/fileops/copy-merge-apply-all", test_copy_merge_and_apply_all);

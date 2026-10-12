@@ -5,6 +5,7 @@
 #include "lifetime.h"
 #include "menu.h"
 #include "open.h"
+#include "props.h"
 
 struct _GbkWindow
 {
@@ -462,28 +463,70 @@ delete_items (GbkWindow *w, GPtrArray *items)
   gtk_widget_show_all (d);
 }
 
+/* ---- name dialogs: rename, create ---- */
+
+typedef enum
+{
+  NAME_RENAME,          /* `path` is the item */
+  NAME_CREATE_FILE,     /* `path` is the directory */
+  NAME_CREATE_FOLDER,
+} NameAction;
+
 static void
-on_rename_response (GtkDialog *d, int response, GbkWindow *w)
+on_name_response (GtkDialog *d, int response, GbkWindow *w)
 {
   if (response == GTK_RESPONSE_ACCEPT)
     {
+      NameAction act = (NameAction) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (d), "gbk-action"));
       const char *path = g_object_get_data (G_OBJECT (d), "gbk-path");
       GtkEntry *entry = g_object_get_data (G_OBJECT (d), "gbk-entry");
+      const char *what = act == NAME_RENAME ? "Can't rename" : "Can't create";
       /* The entry holds UTF-8; filenames are bytes in the filesystem encoding. */
       g_autoptr (GError) error = nullptr;
       g_autofree char *name = g_filename_from_utf8 (gtk_entry_get_text (entry), -1, nullptr,
                                                     nullptr, &error);
-      if (name == nullptr)
-        gbk_jobui_error (GTK_WINDOW (w), "Can't rename", error->message);
-      else if (!gbk_ops_valid_name (name, &error))
-        gbk_jobui_error (GTK_WINDOW (w), "Can't rename", error->message);
+      if (name == nullptr || !gbk_ops_valid_name (name, &error))
+        gbk_jobui_error (GTK_WINDOW (w), what, error->message);
       else
         {
-          g_autoptr (GbkJob) job = gbk_job_new_rename (path, name);
+          g_autoptr (GbkJob) job = act == NAME_RENAME
+                                     ? gbk_job_new_rename (path, name)
+                                     : gbk_job_new_create (path, name, act == NAME_CREATE_FOLDER);
           start_job (w, job);
         }
     }
   gtk_widget_destroy (GTK_WIDGET (d));
+}
+
+/* Ask for a name, starting from `initial` (filename bytes). Selects all of it, or only the
+ * part before the extension when `select_stem`, so typing replaces the right part. */
+static void
+name_dialog (GbkWindow *w, NameAction act, const char *path, const char *initial,
+             bool select_stem)
+{
+  static const char *const titles[] = { "Rename", "Create File", "Create Folder" };
+  GtkWidget *d = gtk_dialog_new_with_buttons (titles[act], GTK_WINDOW (w),
+                                              GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                              "_Cancel", GTK_RESPONSE_CANCEL,
+                                              act == NAME_RENAME ? "_Rename" : "C_reate",
+                                              GTK_RESPONSE_ACCEPT, nullptr);
+  gtk_dialog_set_default_response (GTK_DIALOG (d), GTK_RESPONSE_ACCEPT);
+  GtkWidget *entry = gtk_entry_new ();
+  g_autofree char *shown = g_filename_display_name (initial);
+  gtk_entry_set_text (GTK_ENTRY (entry), shown);
+  gtk_entry_set_activates_default (GTK_ENTRY (entry), true);
+  gtk_entry_set_width_chars (GTK_ENTRY (entry), (int) MIN (60, MAX (30, g_utf8_strlen (shown, -1) + 5)));
+  GtkWidget *area = gtk_dialog_get_content_area (GTK_DIALOG (d));
+  gtk_container_set_border_width (GTK_CONTAINER (area), 8);
+  gtk_box_pack_start (GTK_BOX (area), entry, true, true, 0);
+  g_object_set_data (G_OBJECT (d), "gbk-action", GINT_TO_POINTER ((int) act));
+  g_object_set_data_full (G_OBJECT (d), "gbk-path", g_strdup (path), g_free);
+  g_object_set_data (G_OBJECT (d), "gbk-entry", entry);
+  gbk_connect (G_OBJECT (w), d, "response", G_CALLBACK (on_name_response), w);
+  gtk_widget_show_all (d);
+  const char *dot = select_stem ? strrchr (shown, '.') : nullptr;
+  int end = (dot != nullptr && dot != shown) ? (int) g_utf8_pointer_to_offset (shown, dot) : -1;
+  gtk_editable_select_region (GTK_EDITABLE (entry), 0, end);
 }
 
 static void
@@ -491,28 +534,49 @@ rename_item (GbkWindow *w, const GbkItem *it)
 {
   if (it == nullptr)
     gbk_fatal ("rename without an item");
-  GtkWidget *d = gtk_dialog_new_with_buttons ("Rename", GTK_WINDOW (w),
-                                              GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
-                                              "_Cancel", GTK_RESPONSE_CANCEL,
-                                              "_Rename", GTK_RESPONSE_ACCEPT, nullptr);
-  gtk_dialog_set_default_response (GTK_DIALOG (d), GTK_RESPONSE_ACCEPT);
-  GtkWidget *entry = gtk_entry_new ();
   g_autofree char *base = g_path_get_basename (it->path);
-  g_autofree char *shown = g_filename_display_name (base);
-  gtk_entry_set_text (GTK_ENTRY (entry), shown);
-  gtk_entry_set_activates_default (GTK_ENTRY (entry), true);
-  gtk_entry_set_width_chars (GTK_ENTRY (entry), (int) MIN (60, MAX (30, g_utf8_strlen (shown, -1) + 5)));
-  GtkWidget *area = gtk_dialog_get_content_area (GTK_DIALOG (d));
-  gtk_container_set_border_width (GTK_CONTAINER (area), 8);
-  gtk_box_pack_start (GTK_BOX (area), entry, true, true, 0);
-  g_object_set_data_full (G_OBJECT (d), "gbk-path", g_strdup (it->path), g_free);
-  g_object_set_data (G_OBJECT (d), "gbk-entry", entry);
-  gbk_connect (G_OBJECT (w), d, "response", G_CALLBACK (on_rename_response), w);
-  gtk_widget_show_all (d);
-  /* Select the name without its extension, so typing replaces just that. */
-  const char *dot = it->is_dir ? nullptr : strrchr (shown, '.');
-  int end = (dot != nullptr && dot != shown) ? (int) g_utf8_pointer_to_offset (shown, dot) : -1;
-  gtk_editable_select_region (GTK_EDITABLE (entry), 0, end);
+  name_dialog (w, NAME_RENAME, it->path, base, !it->is_dir);
+}
+
+/* "New Folder", or "New Folder (n)" if the folder (as last listed) has that name. Only a
+ * suggestion: creating never replaces, whatever appeared since. */
+static void
+create_item (GbkWindow *w, GbkBrowser *b, const char *dir, bool folder)
+{
+  const char *base = folder ? "New Folder" : "New File";
+  GbkDirModel *m = gbk_browser_model (b);
+  g_autofree char *name = g_strdup (base);
+  for (unsigned n = 1; m != nullptr && gbk_dir_model_find (m, name) != GBK_HANDLE_NONE && n < 10000; n++)
+    {
+      g_free (name);
+      name = gbk_ops_numbered_name (base, n);
+    }
+  name_dialog (w, folder ? NAME_CREATE_FOLDER : NAME_CREATE_FILE, dir, name, false);
+}
+
+static bool
+all_executable (GPtrArray *items)
+{
+  for (guint i = 0; i < items->len; i++)
+    if (!((const GbkItem *) g_ptr_array_index (items, i))->executable)
+      return false;
+  return items->len > 0;
+}
+
+/* Executable on for all of them, unless all of them already are: then off. */
+static void
+toggle_executable (GbkWindow *w, GPtrArray *items)
+{
+  g_autoptr (GPtrArray) paths = paths_of (items);
+  g_autoptr (GbkJob) job = gbk_job_new_executable (paths, !all_executable (items));
+  start_job (w, job);
+}
+
+static void
+show_properties (GbkWindow *w, const GbkItem *it)
+{
+  GbkProps *p = gbk_props_new (GTK_WINDOW (w), it->path, it->mime);
+  gtk_widget_show (GTK_WIDGET (p));
 }
 
 /* ---- context menu ---- */
@@ -634,6 +698,10 @@ on_menu_item (GtkMenuItem *mi, GbkWindow *w)
     case GBK_MENU_TRASH: trash_items (w, items); break;
     case GBK_MENU_DELETE: delete_items (w, items); break;
     case GBK_MENU_RENAME: rename_item (w, first); break;
+    case GBK_MENU_EXECUTABLE: toggle_executable (w, items); break;
+    case GBK_MENU_PROPERTIES: show_properties (w, first); break;
+    case GBK_MENU_CREATE_FOLDER: create_item (w, b, first->path, true); break;
+    case GBK_MENU_CREATE_FILE: create_item (w, b, first->path, false); break;
     case GBK_MENU_SEPARATOR:
     default:
       gbk_fatal ("bad menu entry kind %d", (int) kind);
@@ -759,6 +827,12 @@ popup_menu (GbkWindow *w, GbkBrowser *b, GPtrArray *items, GbkMenuTarget target,
         case GBK_MENU_TRASH: menu_item (w, menu, "Move to Trash", e->kind); break;
         case GBK_MENU_DELETE: menu_item (w, menu, "Delete", e->kind); break;
         case GBK_MENU_RENAME: menu_item (w, menu, "Rename…", e->kind); break;
+        case GBK_MENU_EXECUTABLE:
+          check_item (w, menu, "Executable", e->kind, all_executable (items), false);
+          break;
+        case GBK_MENU_PROPERTIES: menu_item (w, menu, "Properties…", e->kind); break;
+        case GBK_MENU_CREATE_FOLDER: menu_item (w, menu, "Create Folder…", e->kind); break;
+        case GBK_MENU_CREATE_FILE: menu_item (w, menu, "Create File…", e->kind); break;
         default:
           gbk_fatal ("bad menu entry kind %d", (int) e->kind);
         }
@@ -860,6 +934,20 @@ ACTION (action_rename)
     rename_item (data, g_ptr_array_index (items, 0));
 }
 
+/* Alt+Enter: the one selected item, or the folder itself when nothing is selected. */
+ACTION (action_properties)
+{
+  GbkWindow *w = data;
+  GbkBrowser *b = active (w);
+  g_autoptr (GPtrArray) items = snapshot_selection (w, b);
+  if (items->len == 0)
+    g_ptr_array_add (items, gbk_item_new_dir (gbk_browser_path (b)));
+  if (items->len == 1)
+    show_properties (w, g_ptr_array_index (items, 0));
+  else
+    gbk_browser_set_message (b, "Properties: select one item");
+}
+
 ACTION (action_new_tab)
 {
   GbkWindow *w = data;
@@ -914,6 +1002,7 @@ static const GActionEntry actions[] = {
   { .name = "trash", .activate = action_trash },
   { .name = "delete", .activate = action_delete },
   { .name = "rename", .activate = action_rename },
+  { .name = "properties", .activate = action_properties },
   { .name = "new-tab", .activate = action_new_tab },
   { .name = "close-tab", .activate = action_close_tab },
   { .name = "close-window", .activate = action_close_window },
@@ -952,6 +1041,7 @@ static const struct
   { "win.trash", { "Delete", "KP_Delete", nullptr } },
   { "win.delete", { "<Shift>Delete", "<Shift>KP_Delete", nullptr } },
   { "win.rename", { "F2", nullptr } },
+  { "win.properties", { "<Alt>Return", "<Alt>KP_Enter", nullptr } },
 };
 
 void

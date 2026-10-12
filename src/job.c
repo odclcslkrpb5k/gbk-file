@@ -18,6 +18,7 @@ typedef struct
   GbkQuestion q;
   GError *error;
   GPtrArray *created;
+  GbkFileInfo *info;
 } Msg;
 
 /* Shared between the main thread and the worker. */
@@ -34,11 +35,11 @@ typedef struct
   GbkChoice answer;
   bool answer_all;
 
-  GbkOpKind kind;
-  bool rename;
+  GbkJobKind kind;
   GPtrArray *sources;
   char *dest;
-  char *new_name;
+  char *name;              /* rename: the new name; create: the name to create */
+  uint32_t rwx;            /* permissions */
   int64_t last_progress;   /* worker only */
 } Shared;
 
@@ -52,6 +53,7 @@ struct _GbkJob
   uint64_t done, total;
   char *current;
   GPtrArray *created;
+  GbkFileInfo *info;
 };
 
 G_DEFINE_FINAL_TYPE (GbkJob, gbk_job, G_TYPE_OBJECT)
@@ -74,6 +76,7 @@ msg_free (Msg *m)
   g_free (m->q.other);
   g_clear_error (&m->error);
   g_clear_pointer (&m->created, g_ptr_array_unref);
+  g_clear_pointer (&m->info, gbk_file_info_free);
   g_free (m);
 }
 
@@ -88,7 +91,7 @@ shared_unref (Shared *s)
   g_cond_clear (&s->cond);
   g_ptr_array_unref (s->sources);
   g_free (s->dest);
-  g_free (s->new_name);
+  g_free (s->name);
   g_free (s);
 }
 
@@ -176,6 +179,28 @@ hook_cancelled (void *data)
   return is_cancelled (data);
 }
 
+/* Execute bit on several files: a failure asks Skip / Cancel when others remain. */
+static void
+run_executable (Shared *s, bool on, GError **error)
+{
+  for (guint i = 0; i < s->sources->len && !is_cancelled (s); i++)
+    {
+      const char *path = g_ptr_array_index (s->sources, i);
+      g_autoptr (GError) e = nullptr;
+      if (gbk_ops_set_executable (path, on, &e))
+        continue;
+      if (s->sources->len == 1)
+        {
+          g_propagate_error (error, g_steal_pointer (&e));
+          return;
+        }
+      if (hook_error (path, e, s) == GBK_CHOICE_CANCEL)
+        break;
+    }
+  if (is_cancelled (s))
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
+}
+
 static void *
 worker (void *data)
 {
@@ -185,13 +210,45 @@ worker (void *data)
   Msg *done = g_new0 (Msg, 1);
   done->type = MSG_FINISHED;
   done->created = g_ptr_array_new_with_free_func (g_free);
-  if (s->rename)
+  const char *first = g_ptr_array_index (s->sources, 0);
+  switch (s->kind)
     {
-      if (gbk_ops_rename (g_ptr_array_index (s->sources, 0), s->new_name, &done->error))
-        g_ptr_array_add (done->created, g_strdup (s->new_name));
+    case GBK_JOB_COPY:
+      gbk_ops_run (GBK_OP_COPY, s->sources, s->dest, &hooks, done->created, &done->error);
+      break;
+    case GBK_JOB_MOVE:
+      gbk_ops_run (GBK_OP_MOVE, s->sources, s->dest, &hooks, done->created, &done->error);
+      break;
+    case GBK_JOB_TRASH:
+      gbk_ops_run (GBK_OP_TRASH, s->sources, s->dest, &hooks, done->created, &done->error);
+      break;
+    case GBK_JOB_DELETE:
+      gbk_ops_run (GBK_OP_DELETE, s->sources, s->dest, &hooks, done->created, &done->error);
+      break;
+    case GBK_JOB_RENAME:
+      if (gbk_ops_rename (first, s->name, &done->error))
+        g_ptr_array_add (done->created, g_strdup (s->name));
+      break;
+    case GBK_JOB_CREATE_FILE:
+    case GBK_JOB_CREATE_FOLDER:
+      if (gbk_ops_create (s->dest, s->name, s->kind == GBK_JOB_CREATE_FOLDER, &done->error))
+        g_ptr_array_add (done->created, g_strdup (s->name));
+      break;
+    case GBK_JOB_SET_EXECUTABLE:
+      run_executable (s, true, &done->error);
+      break;
+    case GBK_JOB_CLEAR_EXECUTABLE:
+      run_executable (s, false, &done->error);
+      break;
+    case GBK_JOB_PERMISSIONS:
+      gbk_ops_set_permissions (first, s->rwx, &done->error);
+      break;
+    case GBK_JOB_INFO:
+      done->info = gbk_ops_info (first, &done->error);
+      break;
+    default:
+      gbk_fatal ("bad job kind %d", (int) s->kind);
     }
-  else
-    gbk_ops_run (s->kind, s->sources, s->dest, &hooks, done->created, &done->error);
   send (s, done);
   shared_unref (s);
   return nullptr;
@@ -206,6 +263,8 @@ finish (GbkJob *job, Msg *m)
   job->waiting = false;
   g_clear_pointer (&job->created, g_ptr_array_unref);
   job->created = g_steal_pointer (&m->created);
+  g_clear_pointer (&job->info, gbk_file_info_free);
+  job->info = g_steal_pointer (&m->info);
   gbk_source_cancel (&job->watch);
   g_signal_emit (job, signals[SIGNAL_FINISHED], 0, m->error);
   g_atomic_int_dec_and_test (&live_jobs);
@@ -307,6 +366,7 @@ gbk_job_finalize (GObject *o)
   shared_unref (job->s);
   g_free (job->current);
   g_clear_pointer (&job->created, g_ptr_array_unref);
+  g_clear_pointer (&job->info, gbk_file_info_free);
   G_OBJECT_CLASS (gbk_job_parent_class)->finalize (o);
 }
 
@@ -331,7 +391,7 @@ gbk_job_init (GbkJob *job G_GNUC_UNUSED)
 }
 
 static GbkJob *
-job_new (GbkOpKind kind, GPtrArray *sources, const char *dest)
+job_new (GbkJobKind kind, GPtrArray *sources, const char *dest)
 {
   GbkJob *job = g_object_new (GBK_TYPE_JOB, nullptr);
   Shared *s = g_new0 (Shared, 1);
@@ -355,23 +415,69 @@ job_new (GbkOpKind kind, GPtrArray *sources, const char *dest)
 GbkJob *
 gbk_job_new (GbkOpKind kind, GPtrArray *sources, const char *dest_dir)
 {
-  return job_new (kind, sources, dest_dir);
+  GbkJobKind k;
+  switch (kind)
+    {
+    case GBK_OP_COPY: k = GBK_JOB_COPY; break;
+    case GBK_OP_MOVE: k = GBK_JOB_MOVE; break;
+    case GBK_OP_TRASH: k = GBK_JOB_TRASH; dest_dir = nullptr; break;
+    case GBK_OP_DELETE: k = GBK_JOB_DELETE; dest_dir = nullptr; break;
+    default: gbk_fatal ("bad operation %d", (int) kind);
+    }
+  return job_new (k, sources, dest_dir);
+}
+
+static GbkJob *
+job_new_one (GbkJobKind kind, const char *path, const char *dest)
+{
+  g_autoptr (GPtrArray) one = g_ptr_array_new_with_free_func (g_free);
+  g_ptr_array_add (one, g_strdup (path));
+  return job_new (kind, one, dest);
 }
 
 GbkJob *
 gbk_job_new_rename (const char *path, const char *new_name)
 {
-  g_autoptr (GPtrArray) one = g_ptr_array_new_with_free_func (g_free);
-  g_ptr_array_add (one, g_strdup (path));
   g_autofree char *dir = g_path_get_dirname (path);
-  GbkJob *job = job_new (GBK_OP_MOVE, one, dir);
-  job->s->rename = true;
-  job->s->new_name = g_strdup (new_name);
+  GbkJob *job = job_new_one (GBK_JOB_RENAME, path, dir);
+  job->s->name = g_strdup (new_name);
   return job;
 }
 
+GbkJob *
+gbk_job_new_create (const char *dir, const char *name, bool folder)
+{
+  g_autofree char *path = g_build_filename (dir, name, nullptr);
+  GbkJob *job = job_new_one (folder ? GBK_JOB_CREATE_FOLDER : GBK_JOB_CREATE_FILE, path, dir);
+  job->s->name = g_strdup (name);
+  return job;
+}
+
+GbkJob *
+gbk_job_new_executable (GPtrArray *paths, bool executable)
+{
+  if (paths->len == 0)
+    gbk_fatal ("executable job without files");
+  return job_new (executable ? GBK_JOB_SET_EXECUTABLE : GBK_JOB_CLEAR_EXECUTABLE, paths, nullptr);
+}
+
+GbkJob *
+gbk_job_new_permissions (const char *path, uint32_t rwx)
+{
+  GbkJob *job = job_new_one (GBK_JOB_PERMISSIONS, path, nullptr);
+  job->s->rwx = rwx & 0777;
+  return job;
+}
+
+GbkJob *
+gbk_job_new_info (const char *path)
+{
+  return job_new_one (GBK_JOB_INFO, path, nullptr);
+}
+
 bool gbk_job_running (GbkJob *job) { return job->running; }
-GbkOpKind gbk_job_kind (GbkJob *job) { return job->s->kind; }
+GbkJobKind gbk_job_kind (GbkJob *job) { return job->s->kind; }
+const GbkFileInfo *gbk_job_info (GbkJob *job) { return job->info; }
 const char *gbk_job_dest (GbkJob *job) { return job->s->dest; }
 size_t gbk_job_n_sources (GbkJob *job) { return job->s->sources->len; }
 const char *gbk_job_current (GbkJob *job) { return job->current != nullptr ? job->current : ""; }

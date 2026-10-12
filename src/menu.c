@@ -38,6 +38,15 @@ action_matches_all (const GbkAction *a, GPtrArray *items)
 }
 
 static bool
+all_regular (GPtrArray *items)
+{
+  for (guint i = 0; i < items->len; i++)
+    if (!((const GbkItem *) g_ptr_array_index (items, i))->regular)
+      return false;
+  return items->len > 0;
+}
+
+static bool
 all_dirs (GPtrArray *items)
 {
   for (guint i = 0; i < items->len; i++)
@@ -55,6 +64,9 @@ gbk_menu_entries (const GbkConfig *config, GPtrArray *items, GbkMenuTarget targe
   switch (target)
     {
     case GBK_MENU_ON_BACKGROUND:
+      add (out, GBK_MENU_CREATE_FOLDER, nullptr);
+      add (out, GBK_MENU_CREATE_FILE, nullptr);
+      add (out, GBK_MENU_SEPARATOR, nullptr);
       add (out, GBK_MENU_PASTE, nullptr);
       add (out, GBK_MENU_COPY_PATH, nullptr);
       add (out, GBK_MENU_SEPARATOR, nullptr);
@@ -99,6 +111,11 @@ gbk_menu_entries (const GbkConfig *config, GPtrArray *items, GbkMenuTarget targe
       add (out, GBK_MENU_DELETE, nullptr);
       if (only != nullptr)
         add (out, GBK_MENU_RENAME, nullptr);
+      if (all_regular (items))
+        {
+          add (out, GBK_MENU_SEPARATOR, nullptr);
+          add (out, GBK_MENU_EXECUTABLE, nullptr);
+        }
       break;
     default:
       gbk_fatal ("bad menu target %d", (int) target);
@@ -120,6 +137,12 @@ gbk_menu_entries (const GbkConfig *config, GPtrArray *items, GbkMenuTarget targe
       add (out, GBK_MENU_SORT_SIZE, nullptr);
       add (out, GBK_MENU_SEPARATOR, nullptr);
       add (out, GBK_MENU_SHOW_HIDDEN, nullptr);
+    }
+
+  if (only != nullptr)
+    {
+      add (out, GBK_MENU_SEPARATOR, nullptr);
+      add (out, GBK_MENU_PROPERTIES, nullptr);
     }
 
   if (out->len > 0 && g_array_index (out, GbkMenuEntry, out->len - 1).kind == GBK_MENU_SEPARATOR)

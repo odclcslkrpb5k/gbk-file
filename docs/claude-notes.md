@@ -323,14 +323,19 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   overlay bar covered the bottom row). Width cache keyed by slot+gen is per MODEL: cleared
   in gbk_view_set_model (stale widths truncated "movies" to "m…s"). All mutation-checked.
 - Alt+Home = home folder (win.home).
-- NEXT (user decided 2026-10-12):
-  * Create Folder… / Create File… at top of background menu; name dialog prefilled
-    "New Folder"/"New File" (auto "(1)" if taken); typed name that exists -> error, never
-    overwrite; job on worker; select new item. NO Ctrl+Shift+N (user doesn't use it).
-  * Properties… (menu + Alt+Enter), single item incl. current folder: name, path, type,
-    size (no recursive), symlink target, mtime/atime/ctime/btime (statx), owner/group,
-    rwx grid + octal. APPLY BUTTON (user's choice, not immediate). stat/chmod on worker.
-  * "Executable" check item in the item menu for EVERY regular file (user's choice), multi
-    selection OK; on = +x where r is set, off = clear all x.
+- BUILT 2026-10-12 (user's choices: Apply button, no Ctrl+Shift+N, Executable on every
+  regular file):
+  * fileops: gbk_ops_create (mkdirat / openat O_EXCL|O_NOFOLLOW, never replaces),
+    gbk_ops_set_executable (+x where r / clear all x; regular files only, follows links),
+    gbk_ops_set_permissions (rwx only, keeps 07000), gbk_ops_info (statx incl. btime,
+    symlink: target's details + link_target; dangling: the link's), gbk_ops_numbered_name.
+  * job: GbkJobKind (COPY..INFO) separate from GbkOpKind; worker switch; info result via
+    gbk_job_info. Executable job on several files asks Skip/Cancel per failure.
+  * Background menu starts "Create Folder… | Create File…"; name suggestion from the MODEL
+    (no syscalls on main thread), "(n)" if taken; shared name_dialog (rename/create).
+  * props.c: GbkProps window (not an app window: no accels), info job on open and after
+    Apply; perms editable only by owner/root; Escape/Close; destroy_with_parent.
+    Alt+Enter = win.properties (selection of 1, or the folder). Properties also in item
+    (single), background and path bar menus.
 - Not built yet (proposed 2026-10-11): New Folder/New File, rubber-band selection, drag and
   drop (ask user if they use it), remember window size, parallel statx.

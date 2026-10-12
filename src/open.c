@@ -21,6 +21,7 @@ gbk_item_new (const GbkConfig *config, const GbkTypeTable *types, const char *di
   it->display = g_strdup (gbk_entry_display (e));
   it->mime = g_strdup (gbk_type_table_mime (types, e->type));
   it->is_dir = gbk_entry_is_dir (e);
+  it->regular = e->kind == GBK_KIND_REGULAR;
   it->executable = (e->flags & GBK_ENTRY_EXECUTABLE) != 0;
   it->script = !it->is_dir && gbk_config_interpreter (config, gbk_entry_name (e)) != nullptr;
   return it;

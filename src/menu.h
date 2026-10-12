@@ -3,14 +3,14 @@
  *
  * On items:      Open, Open in New Tab / Window (all folders), Open With (same-type files),
  *                Execute / Execute in Terminal (one runnable file), Open Terminal Here (one
- *                folder), clipboard and file operations, Copy Full Path, then configured
- *                actions that match every item.
- * On empty space (the current directory as a folder): Paste, Copy Full Path, Open Terminal
- *                Here, actions that accept directories, then the sort modes and Show Hidden
- *                Files.
+ *                folder), clipboard and file operations, Copy Full Path, Executable (all
+ *                regular files), configured actions that match every item, Properties (one).
+ * On empty space (the current directory as a folder): Create Folder / File, Paste, Copy
+ *                Full Path, Open Terminal Here, actions that accept directories, the sort
+ *                modes and Show Hidden Files, Properties.
  * On a path bar button (one folder, an ancestor of or the current one): opening, Copy,
- *                Paste Into Folder, Copy Full Path and actions; nothing that moves, renames
- *                or deletes it, since the tab is inside it. */
+ *                Paste Into Folder, Copy Full Path, actions and Properties; nothing that
+ *                moves, renames or deletes it, since the tab is inside it. */
 #pragma once
 
 #include "open.h"
@@ -34,6 +34,10 @@ typedef enum
   GBK_MENU_TRASH,
   GBK_MENU_DELETE,
   GBK_MENU_RENAME,
+  GBK_MENU_EXECUTABLE,         /* check item: on when every item is executable */
+  GBK_MENU_PROPERTIES,         /* one item */
+  GBK_MENU_CREATE_FOLDER,      /* in the current directory */
+  GBK_MENU_CREATE_FILE,
   GBK_MENU_SORT_NAME,
   GBK_MENU_SORT_MTIME,
   GBK_MENU_SORT_SIZE,

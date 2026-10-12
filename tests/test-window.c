@@ -1,6 +1,7 @@
 /* Browser window: navigation, history, hidden toggle, vanished directories (under Xvfb). */
 #include "lifetime.h"
 #include "job.h"
+#include "props.h"
 #include "window.h"
 
 static GtkApplication *app;
@@ -412,8 +413,8 @@ test_context_menu (void)
   GtkMenu *menu = open_context_menu (w);
   g_autofree char *labels = menu_labels (menu);
   g_assert_cmpstr (labels, ==,
-                   "Paste|Copy Full Path|-|Open Terminal Here|-|Sort by Name|Sort by Date Modified|"
-                   "Sort by Size|-|Show Hidden Files");
+                   "Create Folder…|Create File…|-|Paste|Copy Full Path|-|Open Terminal Here|-|"
+                   "Sort by Name|Sort by Date Modified|Sort by Size|-|Show Hidden Files|-|Properties…");
   const char *first = gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0)));
   g_assert_cmpstr (first, ==, "a-old");
   choose (menu, "Sort by Date Modified");
@@ -592,6 +593,232 @@ test_scroll_extent (void)
   g_assert_cmpuint (gbk_view_item_at (v, 1, 1), ==, gbk_dir_model_visible_handle (model_of (w), want));
 
   gtk_widget_destroy (GTK_WIDGET (w));
+  rm_rf (root);
+}
+
+/* ---- create, executable, properties ---- */
+
+/* The visible toplevel of `type` (with `title`, if given), or nullptr. */
+static GtkWindow *
+find_toplevel (GType type, const char *title)
+{
+  g_autoptr (GList) all = gtk_window_list_toplevels ();
+  for (GList *l = all; l != nullptr; l = l->next)
+    if (G_TYPE_CHECK_INSTANCE_TYPE (l->data, type) && gtk_widget_get_visible (l->data)
+        && (title == nullptr || g_strcmp0 (gtk_window_get_title (l->data), title) == 0))
+      return l->data;
+  return nullptr;
+}
+
+static bool
+dialog_open (void *title_ptr)
+{
+  return find_toplevel (GTK_TYPE_DIALOG, *(const char **) title_ptr) != nullptr;
+}
+
+/* The entry of the name dialog titled `title`. */
+static GtkEntry *
+name_entry (const char *title)
+{
+  g_assert_true (wait_until (dialog_open, &title));
+  GtkWindow *d = find_toplevel (GTK_TYPE_DIALOG, title);
+  return GTK_ENTRY (g_object_get_data (G_OBJECT (d), "gbk-entry"));
+}
+
+static GtkMenuItem *
+menu_item_named (GtkMenu *menu, const char *label)
+{
+  g_autoptr (GList) children = gtk_container_get_children (GTK_CONTAINER (menu));
+  for (GList *l = children; l != nullptr; l = l->next)
+    if (GTK_IS_MENU_ITEM (l->data) && !GTK_IS_SEPARATOR_MENU_ITEM (l->data)
+        && g_strcmp0 (gtk_menu_item_get_label (l->data), label) == 0)
+      return l->data;
+  gbk_fatal ("no menu item \"%s\"", label);
+}
+
+typedef struct
+{
+  GbkWindow *w;
+  const char *name;
+} NameCtx;
+
+static bool
+cursor_is (void *data)
+{
+  NameCtx *c = data;
+  const char *name = cursor_name (c->w);
+  return name != nullptr && g_str_equal (name, c->name);
+}
+
+static bool
+is_executable (void *path)
+{
+  return g_file_test (path, G_FILE_TEST_IS_EXECUTABLE);
+}
+
+static bool
+not_executable (void *path)
+{
+  return !g_file_test (path, G_FILE_TEST_IS_EXECUTABLE);
+}
+
+static bool
+props_loaded (void *p)
+{
+  return gbk_props_loaded (p);
+}
+
+static bool
+error_shown (void *data G_GNUC_UNUSED)
+{
+  return find_toplevel (GTK_TYPE_MESSAGE_DIALOG, nullptr) != nullptr;
+}
+
+static void
+test_create_executable_properties (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "New Folder/", nullptr });
+  g_autofree char *notes = g_build_filename (root, "notes.txt", nullptr);
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+
+  /* Create Folder: "New Folder" is taken, so it suggests "New Folder (1)"; the new folder
+   * ends up selected. */
+  choose (open_context_menu (w), "Create Folder…");
+  GtkEntry *entry = name_entry ("Create Folder");
+  g_assert_cmpstr (gtk_entry_get_text (entry), ==, "New Folder (1)");
+  gtk_dialog_response (GTK_DIALOG (find_toplevel (GTK_TYPE_DIALOG, "Create Folder")),
+                       GTK_RESPONSE_ACCEPT);
+  NameCtx c1 = { w, "New Folder (1)" };
+  g_assert_true (wait_until (cursor_is, &c1));
+  g_autofree char *nf1 = g_build_filename (root, "New Folder (1)", nullptr);
+  g_assert_true (g_file_test (nf1, G_FILE_TEST_IS_DIR));
+
+  /* Create File with a typed name. */
+  gbk_view_unselect_all (gbk_window_view (w));
+  choose (open_context_menu (w), "Create File…");
+  entry = name_entry ("Create File");
+  g_assert_cmpstr (gtk_entry_get_text (entry), ==, "New File");
+  gtk_entry_set_text (entry, "notes.txt");
+  gtk_dialog_response (GTK_DIALOG (find_toplevel (GTK_TYPE_DIALOG, "Create File")),
+                       GTK_RESPONSE_ACCEPT);
+  NameCtx c2 = { w, "notes.txt" };
+  g_assert_true (wait_until (cursor_is, &c2));
+  g_assert_true (g_file_test (notes, G_FILE_TEST_IS_REGULAR));
+
+  /* A name that exists: an error, and nothing is replaced. */
+  g_assert_true (g_file_set_contents (notes, "keep", -1, nullptr));
+  gbk_view_unselect_all (gbk_window_view (w));
+  choose (open_context_menu (w), "Create File…");
+  entry = name_entry ("Create File");
+  gtk_entry_set_text (entry, "notes.txt");
+  gtk_dialog_response (GTK_DIALOG (find_toplevel (GTK_TYPE_DIALOG, "Create File")),
+                       GTK_RESPONSE_ACCEPT);
+  g_assert_true (wait_until (error_shown, nullptr));
+  gtk_widget_destroy (GTK_WIDGET (find_toplevel (GTK_TYPE_MESSAGE_DIALOG, nullptr)));
+  g_autofree char *kept = nullptr;
+  g_assert_true (g_file_get_contents (notes, &kept, nullptr, nullptr));
+  g_assert_cmpstr (kept, ==, "keep");
+
+  /* Executable: a check item showing the state; choosing it flips it. */
+  GbkDirModel *m = model_of (w);
+  gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (m, "notes.txt"));
+  GtkMenu *menu = open_context_menu (w);
+  g_assert_false (gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM (menu_item_named (menu, "Executable"))));
+  choose (menu, "Executable");
+  g_assert_true (wait_until (is_executable, notes));
+  g_assert_true (wait_until (menus_gone, w));
+  /* The model hears about the change (inotify) before the menu shows it as on. */
+  for (int i = 0; i < 100; i++)
+    {
+      const GbkEntry *e = gbk_dir_model_get (m, gbk_dir_model_find (m, "notes.txt"));
+      if (e != nullptr && (e->flags & GBK_ENTRY_EXECUTABLE))
+        break;
+      while (gtk_events_pending ())
+        gtk_main_iteration ();
+      g_usleep (10000);
+    }
+  gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (m, "notes.txt"));
+  menu = open_context_menu (w);
+  g_assert_true (gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM (menu_item_named (menu, "Executable"))));
+  choose (menu, "Executable");
+  g_assert_true (wait_until (not_executable, notes));
+  g_assert_true (wait_until (menus_gone, w));
+
+  /* Properties: details, then permissions changed with Apply. */
+  g_assert_cmpint (chmod (notes, 0640), ==, 0);
+  choose (open_context_menu (w), "Properties…");
+  g_assert_true (wait_until (menus_gone, w));
+  GbkProps *p = GBK_PROPS (find_toplevel (GBK_TYPE_PROPS, "notes.txt Properties"));
+  g_assert_nonnull (p);
+  g_assert_true (wait_until (props_loaded, p));
+  g_assert_cmpstr (gbk_props_value (p, "Name"), ==, "notes.txt");
+  g_assert_cmpstr (gbk_props_value (p, "Location"), ==, root);
+  g_assert_cmpstr (gbk_props_value (p, "Size"), ==, "4 bytes (4 bytes)");
+  g_assert_nonnull (gbk_props_value (p, "Modified"));
+  g_assert_nonnull (gbk_props_value (p, "Owner"));
+  g_assert_cmpstr (gbk_props_octal (p), ==, "640");
+  g_assert_false (gtk_widget_get_sensitive (GTK_WIDGET (gbk_props_apply_button (p))));
+  gtk_toggle_button_set_active (gbk_props_permission (p, 0, 2), true);     /* owner execute */
+  gtk_toggle_button_set_active (gbk_props_permission (p, 2, 0), true);     /* others read */
+  g_assert_cmpstr (gbk_props_octal (p), ==, "744");
+  g_assert_true (gtk_widget_get_sensitive (GTK_WIDGET (gbk_props_apply_button (p))));
+  g_assert_true (not_executable (notes));               /* nothing changes before Apply */
+  gtk_button_clicked (gbk_props_apply_button (p));
+  g_assert_true (wait_until (is_executable, notes));
+  g_assert_true (wait_until (props_loaded, p));         /* re-read after applying */
+  struct stat st;
+  g_assert_cmpint (stat (notes, &st), ==, 0);
+  g_assert_cmpint (st.st_mode & 0777, ==, 0744);
+  g_assert_false (gtk_widget_get_sensitive (GTK_WIDGET (gbk_props_apply_button (p))));
+  const char *art = g_getenv ("GBK_ARTIFACTS");
+  if (art != nullptr)
+    {
+      for (int i = 0; i < 10; i++)          /* past the theme's check-box animations */
+        settle ();
+      gtk_container_check_resize (GTK_CONTAINER (p));
+      int pw = gtk_widget_get_allocated_width (GTK_WIDGET (p));
+      int ph = gtk_widget_get_allocated_height (GTK_WIDGET (p));
+      cairo_surface_t *surf = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, pw, ph);
+      cairo_t *cr = cairo_create (surf);
+      gtk_widget_draw (GTK_WIDGET (p), cr);
+      cairo_destroy (cr);
+      g_autofree char *png = g_build_filename (art, "props.png", nullptr);
+      cairo_surface_write_to_png (surf, png);
+      cairo_surface_destroy (surf);
+    }
+  /* Escape closes it. */
+  GtkWidget *alive = GTK_WIDGET (p);
+  g_object_add_weak_pointer (G_OBJECT (p), (void **) &alive);
+  GdkEvent *ev = gdk_event_new (GDK_KEY_PRESS);
+  ev->key.window = g_object_ref (gtk_widget_get_window (GTK_WIDGET (p)));
+  ev->key.keyval = GDK_KEY_Escape;
+  gdk_event_set_device (ev, gdk_seat_get_keyboard (
+      gdk_display_get_default_seat (gtk_widget_get_display (GTK_WIDGET (p)))));
+  gtk_main_do_event (ev);
+  gdk_event_free (ev);
+  g_assert_null (alive);
+
+  /* Alt+Enter with nothing selected: the folder itself (no size). */
+  gbk_view_unselect_all (gbk_window_view (w));
+  activate (w, "properties");
+  g_autofree char *base = g_path_get_basename (root);
+  g_autofree char *title = g_strdup_printf ("%s Properties", base);
+  p = GBK_PROPS (find_toplevel (GBK_TYPE_PROPS, title));
+  g_assert_nonnull (p);
+  g_assert_true (wait_until (props_loaded, p));
+  g_assert_cmpstr (gbk_props_value (p, "Type"), ==, "Folder");
+  g_assert_null (gbk_props_value (p, "Size"));
+
+  /* It closes with its window. */
+  alive = GTK_WIDGET (p);
+  g_object_add_weak_pointer (G_OBJECT (p), (void **) &alive);
+  gtk_widget_destroy (GTK_WIDGET (w));
+  while (gtk_events_pending ())
+    gtk_main_iteration ();
+  g_assert_null (alive);
   rm_rf (root);
 }
 
@@ -828,7 +1055,7 @@ test_pathbar (void)
   GtkMenu *menu = right_click_bar (w, a);
   g_autofree char *labels = menu_labels (menu);
   g_assert_cmpstr (labels, ==, "Open|Open in New Tab|Open in New Window|Open Terminal Here|-|"
-                               "Copy|Paste Into Folder|Copy Full Path");
+                               "Copy|Paste Into Folder|Copy Full Path|-|Properties…");
   choose (menu, "Copy Full Path");
   g_autofree char *copied = clipboard_text (w);
   g_assert_cmpstr (copied, ==, a);
@@ -1038,6 +1265,7 @@ main (int argc, char **argv)
   g_test_add_func ("/window/context-menu", test_context_menu);
   g_test_add_func ("/window/open-folder-elsewhere", test_open_folder_elsewhere);
   g_test_add_func ("/window/scroll-extent", test_scroll_extent);
+  g_test_add_func ("/window/create-executable-properties", test_create_executable_properties);
   g_test_add_func ("/window/file-operations", test_file_operations);
   g_test_add_func ("/window/job-outlives-window", test_job_outlives_window);
   g_test_add_func ("/window/pathbar", test_pathbar);

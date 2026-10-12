@@ -177,6 +177,74 @@ test_rename_error (void)
   g_clear_error (&w.error);
 }
 
+/* Start `job` with a watch owned by `owner` and wait for it. */
+static void
+run_job (GbkJob *job, Watch *w, GObject *owner)
+{
+  w->job = job;
+  gbk_connect (owner, job, "question", G_CALLBACK (on_question), w);
+  gbk_connect (owner, job, "finished", G_CALLBACK (on_finished), w);
+  gbk_job_start (job);
+  wait_finished (w);
+}
+
+static void
+test_create_info_executable (void)
+{
+  g_autoptr (GObject) owner = g_object_new (G_TYPE_OBJECT, nullptr);
+  g_autofree char *dir = g_build_filename (root, "k", nullptr);
+  g_mkdir_with_parents (dir, 0755);
+
+  /* Create: reports the name it created, in its destination. */
+  Watch w1 = { 0 };
+  g_autoptr (GbkJob) create = gbk_job_new_create (dir, "New Folder", true);
+  g_assert_cmpint (gbk_job_kind (create), ==, GBK_JOB_CREATE_FOLDER);
+  run_job (create, &w1, owner);
+  g_assert_no_error (w1.error);
+  g_assert_cmpstr (gbk_job_dest (create), ==, dir);
+  g_assert_cmpuint (gbk_job_created (create)->len, ==, 1);
+  g_assert_cmpstr (g_ptr_array_index (gbk_job_created (create), 0), ==, "New Folder");
+  g_assert_true (exists ("k/New Folder"));
+
+  /* Creating it again fails without asking anything. */
+  Watch w2 = { 0 };
+  g_autoptr (GbkJob) again = gbk_job_new_create (dir, "New Folder", true);
+  run_job (again, &w2, owner);
+  g_assert_error (w2.error, G_IO_ERROR, G_IO_ERROR_EXISTS);
+  g_assert_cmpint (w2.questions, ==, 0);
+  g_clear_error (&w2.error);
+
+  /* Executable on two files; one of them a folder: asked once (Skip), the other done. */
+  put ("k/a.sh", "");
+  g_autoptr (GPtrArray) paths = g_ptr_array_new_with_free_func (g_free);
+  g_ptr_array_add (paths, g_build_filename (root, "k/New Folder", nullptr));
+  g_ptr_array_add (paths, g_build_filename (root, "k/a.sh", nullptr));
+  Watch w3 = { .answer = GBK_CHOICE_SKIP };
+  g_autoptr (GbkJob) exec = gbk_job_new_executable (paths, true);
+  run_job (exec, &w3, owner);
+  g_assert_no_error (w3.error);
+  g_assert_cmpint (w3.questions, ==, 1);
+  g_assert_cmpint (w3.last_kind, ==, GBK_QUESTION_ERROR);
+  g_assert_true (g_file_test (g_ptr_array_index (paths, 1), G_FILE_TEST_IS_EXECUTABLE));
+
+  /* Info: the result is there once it's finished. */
+  Watch w4 = { 0 };
+  g_autoptr (GbkJob) info = gbk_job_new_info (g_ptr_array_index (paths, 1));
+  g_assert_null (gbk_job_info (info));
+  run_job (info, &w4, owner);
+  g_assert_no_error (w4.error);
+  g_assert_nonnull (gbk_job_info (info));
+  g_assert_true (S_ISREG (gbk_job_info (info)->mode));
+  g_assert_cmpint (gbk_job_info (info)->mode & 0100, ==, 0100);
+
+  /* Permissions. */
+  Watch w5 = { 0 };
+  g_autoptr (GbkJob) perm = gbk_job_new_permissions (g_ptr_array_index (paths, 1), 0600);
+  run_job (perm, &w5, owner);
+  g_assert_no_error (w5.error);
+  g_assert_false (g_file_test (g_ptr_array_index (paths, 1), G_FILE_TEST_IS_EXECUTABLE));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -187,6 +255,7 @@ main (int argc, char **argv)
   g_test_add_func ("/job/cancel-while-asking", test_cancel_while_asking);
   g_test_add_func ("/job/outlives-creator", test_outlives_creator);
   g_test_add_func ("/job/rename-error", test_rename_error);
+  g_test_add_func ("/job/create-info-executable", test_create_info_executable);
   int status = g_test_run ();
   if (!no_jobs () || gbk_lifetime_live () != 0)
     gbk_fatal ("jobs or registrations leaked");

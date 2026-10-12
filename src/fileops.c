@@ -99,27 +99,30 @@ gbk_ops_valid_name (const char *name, GError **error)
 }
 
 char *
+gbk_ops_numbered_name (const char *name, unsigned n)
+{
+  /* Split stem/extension; a leading dot is part of the stem. */
+  const char *ext = name[0] != '\0' ? strstr (name + 1, ".tar.") : nullptr;
+  if (ext == nullptr && name[0] != '\0')
+    ext = strrchr (name + 1, '.');
+  if (ext == nullptr)
+    ext = name + strlen (name);
+  g_autofree char *stem = g_strndup (name, (gsize) (ext - name));
+  return g_strdup_printf ("%s (%u)%s", stem, n, ext);
+}
+
+char *
 gbk_ops_free_name (const char *dir, const char *name)
 {
-  /* Split stem/extension: "a.txt" -> "a (1).txt", "x.tar.gz" -> "x (1).tar.gz",
-   * ".bashrc" -> ".bashrc (1)". */
-  const char *ext = strstr (name + 1, ".tar.");
-  if (ext == nullptr)
-    {
-      ext = strrchr (name + 1, '.');
-      if (ext == nullptr)
-        ext = name + strlen (name);
-    }
-  g_autofree char *stem = g_strndup (name, (gsize) (ext - name));
   for (unsigned n = 1; n < 100000; n++)
     {
-      g_autofree char *candidate = g_strdup_printf ("%s (%u)%s", stem, n, ext);
+      g_autofree char *candidate = gbk_ops_numbered_name (name, n);
       g_autofree char *path = g_build_filename (dir, candidate, nullptr);
       struct stat st;
       if (lstat (path, &st) != 0 && errno == ENOENT)
         return g_steal_pointer (&candidate);
     }
-  return g_strdup_printf ("%s (%" G_GINT64_FORMAT ")%s", stem, g_get_real_time (), ext);
+  return gbk_ops_numbered_name (name, (unsigned) (g_get_real_time () & 0x7fffffff));
 }
 
 /* Total work for progress: bytes of regular files (copy/move) or entries (trash/delete). */
@@ -662,4 +665,173 @@ gbk_ops_rename (const char *path, const char *new_name, GError **error)
       return false;
     }
   return true;
+}
+
+/* ---- create, permissions, info ---- */
+
+static void
+set_errno_error (GError **error, int err, const char *what, const char *path)
+{
+  g_autofree char *shown = g_filename_display_name (path);
+  g_set_error (error, G_IO_ERROR, (int) g_io_error_from_errno (err), "%s \"%s\": %s", what, shown,
+               g_strerror (err));
+}
+
+bool
+gbk_ops_create (const char *dir, const char *name, bool folder, GError **error)
+{
+  if (!gbk_ops_valid_name (name, error))
+    return false;
+  int dirfd = open (dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (dirfd < 0)
+    {
+      set_errno_error (error, errno, "Can't open", dir);
+      return false;
+    }
+  int r;
+  if (folder)
+    r = mkdirat (dirfd, name, 0777);
+  else
+    {
+      r = openat (dirfd, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0666);
+      if (r >= 0)
+        r = close (r) == 0 || errno == EINTR ? 0 : -1;
+    }
+  int err = errno;
+  close (dirfd);
+  if (r != 0)
+    {
+      g_autofree char *shown = g_filename_display_name (name);
+      if (err == EEXIST)
+        g_set_error (error, G_IO_ERROR, G_IO_ERROR_EXISTS, "\"%s\" already exists", shown);
+      else
+        g_set_error (error, G_IO_ERROR, (int) g_io_error_from_errno (err), "Can't create \"%s\": %s",
+                     shown, g_strerror (err));
+      return false;
+    }
+  return true;
+}
+
+/* chmod `path` (following a symlink) to `make(old mode)`, if that changes anything. */
+static bool
+change_mode (const char *path, bool regular_only, mode_t (*make) (mode_t old, uint32_t arg),
+             uint32_t arg, GError **error)
+{
+  struct stat st;
+  if (stat (path, &st) != 0)
+    {
+      set_errno_error (error, errno, "Can't read", path);
+      return false;
+    }
+  if (regular_only && !S_ISREG (st.st_mode))
+    {
+      g_autofree char *shown = g_filename_display_name (path);
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_REGULAR_FILE, "\"%s\" is not a regular file",
+                   shown);
+      return false;
+    }
+  mode_t want = make (st.st_mode & 07777, arg);
+  if (want == (st.st_mode & 07777))
+    return true;
+  if (chmod (path, want) != 0)
+    {
+      set_errno_error (error, errno, "Can't change permissions of", path);
+      return false;
+    }
+  return true;
+}
+
+static mode_t
+exec_mode (mode_t old, uint32_t on)
+{
+  return on ? old | ((old & 0444) >> 2) : old & (mode_t) ~0111;
+}
+
+static mode_t
+rwx_mode (mode_t old, uint32_t rwx)
+{
+  return (old & 07000) | (rwx & 0777);
+}
+
+bool
+gbk_ops_set_executable (const char *path, bool executable, GError **error)
+{
+  return change_mode (path, true, exec_mode, executable, error);
+}
+
+bool
+gbk_ops_set_permissions (const char *path, uint32_t rwx, GError **error)
+{
+  return change_mode (path, false, rwx_mode, rwx, error);
+}
+
+static int64_t
+ts_ns (const struct statx_timestamp *t)
+{
+  return t->tv_sec * INT64_C (1000000000) + t->tv_nsec;
+}
+
+/* User and group names (NSS: may consult the network, so worker only). */
+static char *
+user_name (uid_t uid)
+{
+  char buf[4096];
+  struct passwd pw, *res = nullptr;
+  return getpwuid_r (uid, &pw, buf, sizeof buf, &res) == 0 && res != nullptr
+         ? g_strdup (res->pw_name) : nullptr;
+}
+
+static char *
+group_name (gid_t gid)
+{
+  char buf[4096];
+  struct group gr, *res = nullptr;
+  return getgrgid_r (gid, &gr, buf, sizeof buf, &res) == 0 && res != nullptr
+         ? g_strdup (res->gr_name) : nullptr;
+}
+
+GbkFileInfo *
+gbk_ops_info (const char *path, GError **error)
+{
+  const unsigned want = STATX_BASIC_STATS | STATX_BTIME;
+  struct statx st;
+  if (statx (AT_FDCWD, path, AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW, want, &st) != 0)
+    {
+      set_errno_error (error, errno, "Can't read", path);
+      return nullptr;
+    }
+  GbkFileInfo *info = g_new0 (GbkFileInfo, 1);
+  if (S_ISLNK (st.stx_mode))
+    {
+      info->symlink = true;
+      info->link_target = g_file_read_link (path, nullptr);
+      struct statx target;
+      if (statx (AT_FDCWD, path, AT_NO_AUTOMOUNT, want, &target) == 0)
+        st = target;
+      else
+        info->dangling = true;
+    }
+  info->mode = st.stx_mode;
+  info->size = st.stx_size;
+  info->uid = st.stx_uid;
+  info->gid = st.stx_gid;
+  info->owner = user_name (st.stx_uid);
+  info->group = group_name (st.stx_gid);
+  info->atime_ns = ts_ns (&st.stx_atime);
+  info->mtime_ns = ts_ns (&st.stx_mtime);
+  info->ctime_ns = ts_ns (&st.stx_ctime);
+  info->has_btime = (st.stx_mask & STATX_BTIME) != 0;
+  info->btime_ns = info->has_btime ? ts_ns (&st.stx_btime) : 0;
+  return info;
+}
+
+void
+gbk_file_info_free (GbkFileInfo *info)
+{
+  if (info == nullptr)
+    return;
+  g_free (info->link_target);
+  g_free (info->owner);
+  g_free (info->group);
+  g_free (info);
 }

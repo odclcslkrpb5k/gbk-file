@@ -23,6 +23,21 @@ typedef struct
   bool other_is_dir;
 } GbkQuestion;
 
+typedef enum
+{
+  GBK_JOB_COPY,
+  GBK_JOB_MOVE,
+  GBK_JOB_TRASH,
+  GBK_JOB_DELETE,
+  GBK_JOB_RENAME,
+  GBK_JOB_CREATE_FILE,
+  GBK_JOB_CREATE_FOLDER,
+  GBK_JOB_SET_EXECUTABLE,
+  GBK_JOB_CLEAR_EXECUTABLE,
+  GBK_JOB_PERMISSIONS,
+  GBK_JOB_INFO,
+} GbkJobKind;
+
 #define GBK_TYPE_JOB (gbk_job_get_type ())
 G_DECLARE_FINAL_TYPE (GbkJob, gbk_job, GBK, JOB, GObject)
 
@@ -34,18 +49,27 @@ G_DECLARE_FINAL_TYPE (GbkJob, gbk_job, GBK, JOB, GObject)
 /* `sources`: absolute paths, copied. `dest_dir` for COPY/MOVE. */
 [[nodiscard]] GbkJob *gbk_job_new (GbkOpKind kind, GPtrArray *sources, const char *dest_dir);
 [[nodiscard]] GbkJob *gbk_job_new_rename (const char *path, const char *new_name);
+/* Create an empty file or folder `name` in `dir` (never replacing anything). */
+[[nodiscard]] GbkJob *gbk_job_new_create (const char *dir, const char *name, bool folder);
+/* Execute permission on/off for regular files (see gbk_ops_set_executable). */
+[[nodiscard]] GbkJob *gbk_job_new_executable (GPtrArray *paths, bool executable);
+/* Set the rwx bits of `path` (see gbk_ops_set_permissions). */
+[[nodiscard]] GbkJob *gbk_job_new_permissions (const char *path, uint32_t rwx);
+/* Read `path`'s details (gbk_ops_info); the result is gbk_job_info() once finished. */
+[[nodiscard]] GbkJob *gbk_job_new_info (const char *path);
 
 void gbk_job_start (GbkJob *job);
 void gbk_job_cancel (GbkJob *job);
 void gbk_job_answer (GbkJob *job, GbkChoice choice, bool apply_all);
 
 bool gbk_job_running (GbkJob *job);
-GbkOpKind gbk_job_kind (GbkJob *job);          /* rename reports GBK_OP_MOVE */
-const char *gbk_job_dest (GbkJob *job);        /* nullptr for trash/delete */
+GbkJobKind gbk_job_kind (GbkJob *job);
+const char *gbk_job_dest (GbkJob *job);        /* where things were created, or nullptr */
 size_t gbk_job_n_sources (GbkJob *job);
 double gbk_job_fraction (GbkJob *job);         /* 0..1, or -1 if unknown yet */
 const char *gbk_job_current (GbkJob *job);     /* item being processed (display name) */
 GPtrArray *gbk_job_created (GbkJob *job);      /* names created in dest (after finishing) */
+const GbkFileInfo *gbk_job_info (GbkJob *job); /* INFO jobs, after success; else nullptr */
 
 /* Jobs still running (tests wait for 0). */
 int gbk_job_live (void);

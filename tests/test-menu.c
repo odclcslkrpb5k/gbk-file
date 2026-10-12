@@ -11,6 +11,7 @@ item (const char *path, const char *mime, bool dir, bool exec, bool script)
   it->display = g_strdup (path);
   it->mime = g_strdup (mime);
   it->is_dir = dir;
+  it->regular = !dir;
   it->executable = exec;
   it->script = script;
   return it;
@@ -30,6 +31,8 @@ describe (GPtrArray *items, GbkMenuTarget target)
     [GBK_MENU_COPY_PATH] = "copy-path",
     [GBK_MENU_PASTE] = "paste", [GBK_MENU_PASTE_INTO] = "paste-into", [GBK_MENU_TRASH] = "trash",
     [GBK_MENU_DELETE] = "delete", [GBK_MENU_RENAME] = "rename",
+    [GBK_MENU_EXECUTABLE] = "executable", [GBK_MENU_PROPERTIES] = "properties",
+    [GBK_MENU_CREATE_FOLDER] = "create-folder", [GBK_MENU_CREATE_FILE] = "create-file",
   };
   g_autoptr (GArray) entries = gbk_menu_entries (config, items, target);
   GString *s = g_string_new ("");
@@ -68,37 +71,44 @@ static void
 test_menus (void)
 {
   assert_menu (items_of (item ("/d/a.zip", "application/zip", false, false, false), (GbkItem *) nullptr), ITEMS,
-               "open with | cut copy copy-path | trash delete rename | action:extract action:compress");
+               "open with | cut copy copy-path | trash delete rename | executable"
+               " | action:extract action:compress | properties");
   assert_menu (items_of (item ("/d/go.sh", "application/x-shellscript", false, true, true), (GbkItem *) nullptr),
-               ITEMS, "open with exec exec-term | cut copy copy-path | trash delete rename | action:compress");
+               ITEMS, "open with exec exec-term | cut copy copy-path | trash delete rename | executable"
+                      " | action:compress | properties");
   assert_menu (items_of (item ("/d/go.sh", "application/x-shellscript", false, false, true), (GbkItem *) nullptr),
-               ITEMS, "open with exec exec-term | cut copy copy-path | trash delete rename | action:compress");
+               ITEMS, "open with exec exec-term | cut copy copy-path | trash delete rename | executable"
+                      " | action:compress | properties");
   assert_menu (items_of (item ("/d/prog", "application/x-executable", false, true, false), (GbkItem *) nullptr),
-               ITEMS, "open with exec exec-term | cut copy copy-path | trash delete rename | action:compress");
+               ITEMS, "open with exec exec-term | cut copy copy-path | trash delete rename | executable"
+                      " | action:compress | properties");
+  /* A folder: no Executable (it means "can enter" there; Properties has it). */
   assert_menu (items_of (item ("/d/sub", "inode/directory", true, false, false), (GbkItem *) nullptr), ITEMS,
-               "open open-tab open-window term-here | cut copy paste-into copy-path | trash delete rename | action:compress");
-  /* Two zips: same type, extract applies to both; no Execute for multiple. */
+               "open open-tab open-window term-here | cut copy paste-into copy-path | trash delete rename"
+               " | action:compress | properties");
+  /* Two zips: same type, extract applies to both; no Execute or Properties for several. */
   assert_menu (items_of (item ("/d/a.zip", "application/zip", false, false, false),
                          item ("/d/b.zip", "application/zip", false, false, false), (GbkItem *) nullptr),
-               ITEMS, "open with | cut copy copy-path | trash delete | action:extract action:compress");
+               ITEMS, "open with | cut copy copy-path | trash delete | executable | action:extract action:compress");
   /* Mixed: no Open With, and extract doesn't apply to the text file. */
   assert_menu (items_of (item ("/d/a.zip", "application/zip", false, false, false),
                          item ("/d/t.txt", "text/plain", false, false, false), (GbkItem *) nullptr),
-               ITEMS, "open | cut copy copy-path | trash delete | action:compress");
+               ITEMS, "open | cut copy copy-path | trash delete | executable | action:compress");
   /* Two folders: open both in tabs or windows; no Terminal Here or Paste Into for two. */
   assert_menu (items_of (item ("/d/s1", "inode/directory", true, false, false),
                          item ("/d/s2", "inode/directory", true, false, false), (GbkItem *) nullptr),
                ITEMS, "open open-tab open-window | cut copy copy-path | trash delete | action:compress");
-  /* A folder and a file: no new tab/window. */
+  /* A folder and a file: no new tab/window, no Executable. */
   assert_menu (items_of (item ("/d/s1", "inode/directory", true, false, false),
                          item ("/d/t.txt", "text/plain", false, false, false), (GbkItem *) nullptr),
                ITEMS, "open | cut copy copy-path | trash delete | action:compress");
   /* Path bar: a folder the tab is inside, so nothing that moves, renames or deletes it. */
   assert_menu (items_of (item ("/d", "inode/directory", true, false, false), (GbkItem *) nullptr), BAR,
-               "open open-tab open-window term-here | copy paste-into copy-path | action:compress");
+               "open open-tab open-window term-here | copy paste-into copy-path | action:compress | properties");
   /* Background: the current directory. */
   assert_menu (items_of (item ("/d", "inode/directory", true, false, false), (GbkItem *) nullptr), BG,
-               "paste copy-path | term-here | action:compress | sort-name sort-mtime sort-size | hidden");
+               "create-folder create-file | paste copy-path | term-here | action:compress"
+               " | sort-name sort-mtime sort-size | hidden | properties");
 }
 
 static void
@@ -107,9 +117,10 @@ test_no_actions_no_dangling_separator (void)
   gbk_config_free (config);
   config = gbk_config_new_default ();
   assert_menu (items_of (item ("/d/t.txt", "text/plain", false, false, false), (GbkItem *) nullptr), ITEMS,
-               "open with | cut copy copy-path | trash delete rename");
+               "open with | cut copy copy-path | trash delete rename | executable | properties");
   assert_menu (items_of (item ("/d", "inode/directory", true, false, false), (GbkItem *) nullptr), BG,
-               "paste copy-path | term-here | sort-name sort-mtime sort-size | hidden");
+               "create-folder create-file | paste copy-path | term-here | sort-name sort-mtime sort-size"
+               " | hidden | properties");
 }
 
 int
