@@ -158,6 +158,10 @@ static void on_activate (GbkView *v, GbkWindow *w);
 static GtkWidget *app_menu_button (void);
 static void on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w);
 static void on_pathbar_menu (GbkPathbar *bar, const char *path, GdkEvent *event, GbkWindow *w);
+static void on_view_drop (GbkView *v, GPtrArray *paths, guint64 folder, GdkEvent *trigger,
+                          GbkWindow *w);
+static void on_pathbar_drop (GbkPathbar *bar, const char *path, GPtrArray *paths,
+                             GdkEvent *trigger, GbkWindow *w);
 
 static GbkBrowser *
 add_tab (GbkWindow *w, const char *path, bool switch_to)
@@ -194,6 +198,8 @@ add_tab (GbkWindow *w, const char *path, bool switch_to)
   gbk_connect (G_OBJECT (w), v, "context-menu", G_CALLBACK (on_context_menu), w);
   gbk_connect (G_OBJECT (w), gbk_browser_pathbar (b), "context-menu",
                G_CALLBACK (on_pathbar_menu), w);
+  gbk_connect (G_OBJECT (w), v, "drop", G_CALLBACK (on_view_drop), w);
+  gbk_connect (G_OBJECT (w), gbk_browser_pathbar (b), "drop", G_CALLBACK (on_pathbar_drop), w);
 
   gtk_widget_show_all (GTK_WIDGET (b));
   int at = gtk_notebook_get_current_page (w->tabs) + 1;
@@ -886,6 +892,99 @@ on_status_bar_press (GtkWidget *bar, GdkEventButton *ev, GbkWindow *w)
     return false;
   popup_background_menu (w, active (w), bar, (GdkEvent *) ev);
   return true;
+}
+
+/* ---- drops: always ask ---- */
+
+/* Dropped files are never moved or copied without asking: an accidental drop onto a
+ * folder is the classic way files vanish into the wrong place. The menu sits where they
+ * were dropped; Escape, clicking elsewhere or Cancel does nothing. */
+#define KEY_DROP_PATHS "gbk-drop-paths"
+#define KEY_DROP_DEST "gbk-drop-dest"
+#define KEY_DROP_MOVE "gbk-drop-move"
+
+static void
+on_drop_chosen (GtkMenuItem *mi, GbkWindow *w)
+{
+  GtkWidget *menu = gtk_widget_get_parent (GTK_WIDGET (mi));
+  GPtrArray *paths = g_object_get_data (G_OBJECT (menu), KEY_DROP_PATHS);
+  const char *dest = g_object_get_data (G_OBJECT (menu), KEY_DROP_DEST);
+  bool move = g_object_get_data (G_OBJECT (mi), KEY_DROP_MOVE) != nullptr;
+  g_autoptr (GbkJob) job = gbk_job_new (move ? GBK_OP_MOVE : GBK_OP_COPY, paths, dest);
+  start_job (w, job);
+}
+
+static bool
+all_in (GPtrArray *paths, const char *dir)
+{
+  for (guint i = 0; i < paths->len; i++)
+    {
+      g_autofree char *parent = g_path_get_dirname (g_ptr_array_index (paths, i));
+      if (!g_str_equal (parent, dir))
+        return false;
+    }
+  return true;
+}
+
+static void
+ask_drop (GbkWindow *w, GbkBrowser *b, GPtrArray *paths, const char *dest, GtkWidget *attach,
+          GdkEvent *trigger)
+{
+  if (all_in (paths, dest))
+    {
+      gbk_browser_set_message (b, "Already in this folder");
+      return;
+    }
+  GtkWidget *menu = gtk_menu_new ();
+  g_object_set_data_full (G_OBJECT (menu), KEY_DROP_PATHS, g_ptr_array_ref (paths),
+                          (GDestroyNotify) g_ptr_array_unref);
+  g_object_set_data_full (G_OBJECT (menu), KEY_DROP_DEST, g_strdup (dest), g_free);
+  GtkWidget *move = gtk_menu_item_new_with_label ("Move Here");
+  g_object_set_data (G_OBJECT (move), KEY_DROP_MOVE, GINT_TO_POINTER (1));
+  GtkWidget *copy = gtk_menu_item_new_with_label ("Copy Here");
+  gbk_connect (G_OBJECT (w), move, "activate", G_CALLBACK (on_drop_chosen), w);
+  gbk_connect (G_OBJECT (w), copy, "activate", G_CALLBACK (on_drop_chosen), w);
+  gtk_menu_shell_append (GTK_MENU_SHELL (menu), move);
+  gtk_menu_shell_append (GTK_MENU_SHELL (menu), copy);
+  gtk_menu_shell_append (GTK_MENU_SHELL (menu), gtk_separator_menu_item_new ());
+  gtk_menu_shell_append (GTK_MENU_SHELL (menu), gtk_menu_item_new_with_label ("Cancel"));
+
+  gtk_menu_attach_to_widget (GTK_MENU (menu), attach, nullptr);
+  gbk_connect (G_OBJECT (menu), menu, "deactivate", G_CALLBACK (on_menu_deactivate), nullptr);
+  gbk_connect (G_OBJECT (menu), attach, "destroy", G_CALLBACK (on_attach_destroyed), menu);
+  gbk_connect (G_OBJECT (menu), b, "destroy", G_CALLBACK (on_attach_destroyed), menu);
+  gtk_widget_show_all (menu);
+  /* At the pointer, which is where the files were dropped. */
+  g_autoptr (GdkEvent) current = trigger == nullptr ? gtk_get_current_event () : nullptr;
+  gtk_menu_popup_at_pointer (GTK_MENU (menu), trigger != nullptr ? trigger : current);
+}
+
+static void
+on_view_drop (GbkView *v, GPtrArray *paths, guint64 folder, GdkEvent *trigger, GbkWindow *w)
+{
+  GbkBrowser *b = browser_of (v);
+  GbkDirModel *m = gbk_browser_model (b);
+  g_autofree char *dest = nullptr;
+  if (folder == GBK_HANDLE_NONE)
+    dest = g_strdup (gbk_browser_path (b));
+  else
+    {
+      const GbkEntry *e = m != nullptr ? gbk_dir_model_get (m, folder) : nullptr;
+      if (e == nullptr)
+        return;                          /* the folder went away mid-drop */
+      dest = g_build_filename (gbk_browser_path (b), gbk_entry_name (e), nullptr);
+    }
+  ask_drop (w, b, paths, dest, GTK_WIDGET (v), trigger);
+}
+
+static void
+on_pathbar_drop (GbkPathbar *bar, const char *path, GPtrArray *paths, GdkEvent *trigger,
+                 GbkWindow *w)
+{
+  GtkWidget *b = gtk_widget_get_ancestor (GTK_WIDGET (bar), GBK_TYPE_BROWSER);
+  if (b == nullptr)
+    gbk_fatal ("path bar outside a browser");
+  ask_drop (w, GBK_BROWSER (b), paths, path, GTK_WIDGET (bar), trigger);
 }
 
 /* Path bar buttons are folders: the current one and its ancestors (and, after going up,

@@ -32,6 +32,7 @@ core_lib = static_library('gbk-core',
 # GUI: needs a display (tests run under Xvfb).
 gui_lib = static_library('gbk-gui',
   'context.c',
+  'dnd.c',
   'clipboard.c',
   'jobui.c',
   'view.c',

@@ -129,11 +129,12 @@ send_key (Fixture *f, guint keyval, GdkModifierType state)
   return handled;
 }
 
+/* A point inside the cell of the item at visible `index`. */
 static void
-send_click (Fixture *f, size_t index, GdkModifierType state, GdkEventType type, guint button)
+item_point (Fixture *f, size_t index, double *x_out, double *y_out)
 {
-  /* Centre of the item's cell: column = index / rows, row = index % rows. Columns may differ
-   * in width, so find x by probing. */
+  /* Column = index / rows, row = index % rows. Columns may differ in width, so find x by
+   * probing. */
   size_t rows = gbk_view_rows_per_column (f->view);
   GbkHandle want = gbk_dir_model_visible_handle (f->model, index);
   int row_h = gtk_widget_get_allocated_height (GTK_WIDGET (f->view)) / (int) rows;
@@ -147,6 +148,15 @@ send_click (Fixture *f, size_t index, GdkModifierType state, GdkEventType type, 
       }
   if (x < 0)
     gbk_fatal ("item %zu not on screen", index);
+  *x_out = x;
+  *y_out = y;
+}
+
+static void
+send_click (Fixture *f, size_t index, GdkModifierType state, GdkEventType type, guint button)
+{
+  double x, y;
+  item_point (f, index, &x, &y);
 
   GdkEvent *ev = gdk_event_new (type);
   ev->button.window = g_object_ref (gtk_widget_get_window (GTK_WIDGET (f->view)));
@@ -279,6 +289,51 @@ test_mouse (Fixture *f, const void *data G_GNUC_UNUSED)
   g_assert_cmpint (f->activations, ==, 1);
 }
 
+/* Pressing on a selected item keeps the selection (it may be the start of dragging all of
+ * it); releasing without a drag selects just that item. */
+static void
+test_press_on_selection (Fixture *f, const void *data G_GNUC_UNUSED)
+{
+  gbk_view_select_all (f->view);
+  size_t all = gbk_view_n_selected (f->view);
+  g_assert_cmpuint (all, >, 3);
+  send_click (f, 4, 0, GDK_BUTTON_PRESS, 1);
+  g_assert_cmpuint (gbk_view_n_selected (f->view), ==, all);
+  g_assert_cmpstr (cursor_name (f), ==, "file00.txt");
+  send_click (f, 4, 0, GDK_BUTTON_RELEASE, 1);
+  g_assert_cmpuint (gbk_view_n_selected (f->view), ==, 1);
+  g_assert_cmpstr (cursor_name (f), ==, "file00.txt");
+  /* On an unselected item, the press selects at once. */
+  send_click (f, 5, 0, GDK_BUTTON_PRESS, 1);
+  g_assert_true (gbk_view_is_selected (f->view, gbk_dir_model_visible_handle (f->model, 5)));
+  g_assert_cmpuint (gbk_view_n_selected (f->view), ==, 1);
+  send_click (f, 5, 0, GDK_BUTTON_RELEASE, 1);
+}
+
+/* Where drops land: on a folder item, into it; anywhere else, into the view's folder. A drag
+ * from this view can't go into an item being dragged, or back where it came from. */
+static void
+test_drop_targets (Fixture *f, const void *data G_GNUC_UNUSED)
+{
+  GbkHandle dir_a = gbk_dir_model_visible_handle (f->model, 0);   /* "Dir A" */
+  double ax, ay, fx, fy;
+  item_point (f, 0, &ax, &ay);
+  item_point (f, 4, &fx, &fy);                                   /* a file */
+  GbkHandle folder;
+  g_assert_true (gbk_view_drop_target_at (f->view, ax, ay, false, &folder));
+  g_assert_cmpuint (folder, ==, dir_a);
+  g_assert_true (gbk_view_drop_target_at (f->view, fx, fy, false, &folder));
+  g_assert_cmpuint (folder, ==, GBK_HANDLE_NONE);
+
+  gbk_view_select_only (f->view, dir_a);
+  g_assert_false (gbk_view_drop_target_at (f->view, ax, ay, true, &folder));   /* into itself */
+  g_assert_false (gbk_view_drop_target_at (f->view, fx, fy, true, &folder));   /* where it is */
+  double bx, by;
+  item_point (f, 1, &bx, &by);                                   /* "Dir B": fine */
+  g_assert_true (gbk_view_drop_target_at (f->view, bx, by, true, &folder));
+  g_assert_cmpuint (folder, ==, gbk_dir_model_visible_handle (f->model, 1));
+}
+
 static void
 test_type_ahead (Fixture *f, const void *data G_GNUC_UNUSED)
 {
@@ -382,6 +437,8 @@ main (int argc, char **argv)
   ADD ("/view/widths-follow-model", test_widths_follow_model, 30, 500, 160);
   ADD ("/view/keyboard", test_keyboard, 30, 500, 160);
   ADD ("/view/mouse", test_mouse, 30, 500, 160);
+  ADD ("/view/press-on-selection", test_press_on_selection, 30, 500, 160);
+  ADD ("/view/drop-targets", test_drop_targets, 30, 500, 160);
   ADD ("/view/type-ahead", test_type_ahead, 30, 500, 160);
   ADD ("/view/live-changes", test_live_changes, 30, 500, 160);
   ADD ("/view/many-items", test_many_items_and_screenshot, 200, 600, 200);

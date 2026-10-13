@@ -341,5 +341,25 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
     Apply; perms editable only by owner/root; Escape/Close; destroy_with_parent.
     Alt+Enter = win.properties (selection of 1, or the folder). Properties also in item
     (single), background and path bar menus.
+- DRAG AND DROP (user, 2026-10-13: "careful"; real failure mode = accidental moves into a
+  subfolder). dnd.{h,c} shared helpers. OUT: uri-list + text, actions COPY|MOVE|LINK|ASK,
+  NO drag_data_delete ever (never delete because a target asked). Press on a selected item
+  defers select-only to release (multi-drag). IN (view + path bar buttons): flags 0 (all
+  ours); drop target = folder item under pointer else view's folder; from same view: not
+  into a dragged item, not onto own folder (status 0). drag_data_received: finish(success,
+  del=FALSE) at once, then emit "drop"; window ALWAYS asks: Move Here / Copy Here / - /
+  Cancel, popup_at_pointer with the current event (SelectionNotify) as trigger. Dropped
+  back into their own folder: "Already in this folder", no menu. Edge autoscroll.
+- COPY = cp -a (user): keep_owner (EPERM -> group only -> nothing), keep_xattrs (fd or l*
+  variants; ACLs ride along), chmod AFTER chown, times incl. symlinks (AT_SYMLINK_NOFOLLOW),
+  dirs' metadata after contents, hard links via Ctx.links "dev:ino"->first copy, mknod for
+  FIFO/socket/dev. Sparse not preserved.
+- TESTING DnD: in-GTK synthetic events can START a drag but never drive it (GTK grabs the
+  pointer at the X server). Real test uses XTest (libxtst-dev in image, gui tests link
+  x11+xtst): fake motion/buttons at root coords. Synthetic drag + gtk_drag_cancel leaves
+  icon popups mapped forever -> don't. GTK keeps empty 1x1 popups at -99,-99 for DnD IPC:
+  "no popups" checks must ignore childless popups. Xvfb has no WM: windows stack at 0,0.
+- MY RECURRING SLIP: filtering build output (grep) hid failures/compile errors twice.
+  Always: set -o pipefail; ./build X > out/build.log; echo exit; grep error: too.
 - Not built yet (proposed 2026-10-11): New Folder/New File, rubber-band selection, drag and
   drop (ask user if they use it), remember window size, parallel statx.

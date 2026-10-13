@@ -49,6 +49,12 @@ program that won't start. On anything else, [build from source](#building).
   a file's contents just to show the folder.
 - **Tabs.** Each tab has its own path bar. Right-click a path bar button for that folder's
   menu.
+- **Drag and drop.** Drag files out to any application, which decides what to do with
+  them. Dropping files *into* gbk-file (onto a folder, empty space or a path bar button)
+  always asks first: **Move Here**, **Copy Here** or **Cancel**, at the pointer. Nothing is
+  moved by accident.
+- **Copies are like `cp -a`:** permissions, ownership (where allowed), timestamps,
+  extended attributes and ACLs, hard links within the copy, and special files are kept.
 - **Create files and folders** from the right-click menu on empty space.
 - **Properties** (right-click menu or Alt+Enter): dates (modified, accessed, changed,
   created), size, owner, group, link target, and read / write / execute permissions you can

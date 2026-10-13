@@ -1,4 +1,6 @@
 #include "view.h"
+#include "cliptext.h"
+#include "dnd.h"
 #include "lifetime.h"
 #include "natsort.h"
 
@@ -10,6 +12,9 @@
 #define TEXT_SLACK 3            /* px added to estimated widths (kerning can widen a bit) */
 #define SEARCH_TIMEOUT_MS 1000
 #define WHEEL_STEP_PX 64
+#define DND_EDGE_PX 24          /* hovering a drag this close to a side scrolls that way */
+#define DND_SCROLL_MS 40
+#define DND_SCROLL_PX 24
 
 static_assert (sizeof (void *) >= sizeof (GbkHandle), "handles are stored as pointers");
 
@@ -60,6 +65,21 @@ struct _GbkView
   GString *search;
   guint search_timeout;
 
+  /* Pressing on an item: a drag may start; pressing on a selected one selects only it on
+   * release unless it became a drag (so several selected items can be dragged). */
+  bool press_armed;
+  bool press_pending;
+  double press_x, press_y;
+  GbkHandle press_item;
+  GPtrArray *drag_paths;        /* what's being dragged out (absolute paths) */
+
+  /* Being dropped onto: the highlighted folder item, or the whole view (its folder). */
+  bool drop_hover;
+  GbkHandle drop_folder;        /* GBK_HANDLE_NONE: the view's own folder */
+  bool drop_requested;          /* we asked for the data of a drop */
+  int scroll_dir;
+  guint autoscroll;
+
   /* Icons, per type id, at the current scale. */
   GPtrArray *icons;             /* cairo_surface_t* or nullptr */
   GArray *icons_tried;          /* bool */
@@ -81,6 +101,7 @@ enum
   SIGNAL_SELECTION_CHANGED,
   SIGNAL_CONTEXT_MENU,
   SIGNAL_SEARCH_CHANGED,
+  SIGNAL_DROP,
   N_SIGNALS
 };
 static guint signals[N_SIGNALS];
@@ -736,6 +757,22 @@ gbk_view_item_at (GbkView *v, double x, double y)
 
 /* ---- drawing ---- */
 
+/* Where a drop would land, outlined in the theme's selection colour. */
+static void
+drop_outline (GbkView *v, cairo_t *cr, int x, int y, int w, int h)
+{
+  GtkStyleContext *sc = gtk_widget_get_style_context (GTK_WIDGET (v));
+  GdkRGBA c;
+  if (!gtk_style_context_lookup_color (sc, "theme_selected_bg_color", &c))
+    gtk_style_context_get_color (sc, gtk_style_context_get_state (sc), &c);
+  cairo_save (cr);
+  gdk_cairo_set_source_rgba (cr, &c);
+  cairo_set_line_width (cr, 2);
+  cairo_rectangle (cr, x + 1, y + 1, MAX (0, w - 2), MAX (0, h - 2));
+  cairo_stroke (cr);
+  cairo_restore (cr);
+}
+
 static gboolean
 gbk_view_draw (GtkWidget *w, cairo_t *cr)
 {
@@ -800,8 +837,12 @@ gbk_view_draw (GtkWidget *w, cairo_t *cr)
           if (focused && h == v->cursor)
             gtk_render_focus (sc, cr, x, y, cw, v->row_h);
           gtk_style_context_restore (sc);
+          if (v->drop_hover && h == v->drop_folder)
+            drop_outline (v, cr, x, y, cw, v->row_h);
         }
     }
+  if (v->drop_hover && v->drop_folder == GBK_HANDLE_NONE)
+    drop_outline (v, cr, 0, 0, width, height);
   pango_layout_set_width (v->layout, -1);
   pango_layout_set_ellipsize (v->layout, PANGO_ELLIPSIZE_NONE);
   return false;
@@ -838,7 +879,19 @@ gbk_view_button_press (GtkWidget *w, GdkEventButton *ev)
             gbk_view_unselect_all (v);
           return true;
         }
-      if (shift)
+      v->press_armed = true;
+      v->press_pending = false;
+      v->press_x = ev->x;
+      v->press_y = ev->y;
+      v->press_item = h;
+      if (!shift && !ctrl && gbk_view_is_selected (v, h))
+        {
+          /* Maybe the start of dragging the whole selection: decide on release. */
+          set_cursor (v, h);
+          v->press_pending = true;
+          gtk_widget_queue_draw (w);
+        }
+      else if (shift)
         {
           size_t a = index_of (v, v->anchor);
           size_t t = index_of (v, h);
@@ -868,6 +921,205 @@ gbk_view_button_press (GtkWidget *w, GdkEventButton *ev)
       return true;
     }
   return false;
+}
+
+static gboolean
+gbk_view_button_release (GtkWidget *w, GdkEventButton *ev)
+{
+  GbkView *v = GBK_VIEW (w);
+  if (ev->button != GDK_BUTTON_PRIMARY)
+    return false;
+  /* A plain click on a selected item (no drag happened): select just it. */
+  if (v->press_pending && v->model != nullptr && gbk_dir_model_get (v->model, v->press_item) != nullptr)
+    gbk_view_select_only (v, v->press_item);
+  v->press_pending = false;
+  v->press_armed = false;
+  return false;
+}
+
+static gboolean
+gbk_view_motion (GtkWidget *w, GdkEventMotion *ev)
+{
+  GbkView *v = GBK_VIEW (w);
+  if (!v->press_armed || !(ev->state & GDK_BUTTON1_MASK))
+    return false;
+  if (!gtk_drag_check_threshold (w, (int) v->press_x, (int) v->press_y, (int) ev->x, (int) ev->y))
+    return true;
+  v->press_armed = false;
+  v->press_pending = false;
+  g_autoptr (GtkTargetList) targets = gbk_dnd_source_targets ();
+  gtk_drag_begin_with_coordinates (w, targets, GBK_DND_ACTIONS, GDK_BUTTON_PRIMARY, (GdkEvent *) ev,
+                                   (int) v->press_x, (int) v->press_y);
+  return true;
+}
+
+/* ---- drag and drop ---- */
+
+/* The selection as absolute paths, in view order. */
+static GPtrArray *
+selected_paths (GbkView *v)
+{
+  GPtrArray *paths = g_ptr_array_new_with_free_func (g_free);
+  const char *dir = v->model != nullptr ? gbk_dir_model_path (v->model) : nullptr;
+  if (dir == nullptr)
+    return paths;
+  size_t n;
+  g_autofree GbkHandle *sel = gbk_view_selected (v, &n);
+  for (size_t i = 0; i < n; i++)
+    {
+      const GbkEntry *e = gbk_dir_model_get (v->model, sel[i]);
+      if (e != nullptr)
+        g_ptr_array_add (paths, g_build_filename (dir, gbk_entry_name (e), nullptr));
+    }
+  return paths;
+}
+
+static void
+gbk_view_drag_begin (GtkWidget *w, GdkDragContext *ctx)
+{
+  GbkView *v = GBK_VIEW (w);
+  /* Snapshot now: the folder can change while the drag is in flight. */
+  g_clear_pointer (&v->drag_paths, g_ptr_array_unref);
+  v->drag_paths = selected_paths (v);
+  const GbkEntry *e = v->model != nullptr ? gbk_dir_model_get (v->model, v->press_item) : nullptr;
+  cairo_surface_t *icon = e != nullptr ? icon_for (v, e->type) : nullptr;
+  if (icon != nullptr)
+    gtk_drag_set_icon_surface (ctx, icon);
+  else
+    gtk_drag_set_icon_default (ctx);
+}
+
+static void
+gbk_view_drag_data_get (GtkWidget *w, GdkDragContext *ctx G_GNUC_UNUSED, GtkSelectionData *sd,
+                        guint info, guint time G_GNUC_UNUSED)
+{
+  GbkView *v = GBK_VIEW (w);
+  if (v->drag_paths != nullptr && v->drag_paths->len > 0)
+    gbk_dnd_set_data (sd, info, v->drag_paths);
+}
+
+static void
+gbk_view_drag_end (GtkWidget *w, GdkDragContext *ctx G_GNUC_UNUSED)
+{
+  g_clear_pointer (&GBK_VIEW (w)->drag_paths, g_ptr_array_unref);
+}
+
+/* Where a drop at (x, y) would go: a folder item under the pointer, else the view's own
+ * folder. Dragging from this very view: not onto an item being dragged (into itself), and
+ * not onto the folder they're already in. */
+static bool
+drop_target (GbkView *v, double x, double y, bool from_self, GbkHandle *folder)
+{
+  *folder = GBK_HANDLE_NONE;
+  if (v->model == nullptr || gbk_dir_model_state (v->model) == GBK_DIR_ERROR)
+    return false;
+  GbkHandle h = gbk_view_item_at (v, x, y);
+  const GbkEntry *e = h != GBK_HANDLE_NONE ? gbk_dir_model_get (v->model, h) : nullptr;
+  if (e != nullptr && gbk_entry_is_dir (e) && !(from_self && gbk_view_is_selected (v, h)))
+    {
+      *folder = h;
+      return true;
+    }
+  return !from_self;
+}
+
+static void
+set_drop_hover (GbkView *v, bool hover, GbkHandle folder)
+{
+  if (v->drop_hover == hover && v->drop_folder == folder)
+    return;
+  v->drop_hover = hover;
+  v->drop_folder = folder;
+  gtk_widget_queue_draw (GTK_WIDGET (v));
+}
+
+static bool
+autoscroll_tick (void *data)
+{
+  GbkView *v = data;
+  if (v->scroll_dir == 0 || v->hadj == nullptr)
+    {
+      v->autoscroll = 0;
+      return false;
+    }
+  gtk_adjustment_set_value (v->hadj, gtk_adjustment_get_value (v->hadj) + v->scroll_dir * DND_SCROLL_PX);
+  return true;
+}
+
+static void
+set_autoscroll (GbkView *v, int dir)
+{
+  v->scroll_dir = dir;
+  if (dir == 0)
+    gbk_source_cancel (&v->autoscroll);
+  else if (v->autoscroll == 0)
+    v->autoscroll = gbk_timeout_add (G_OBJECT (v), DND_SCROLL_MS, autoscroll_tick, v);
+}
+
+static gboolean
+gbk_view_drag_motion (GtkWidget *w, GdkDragContext *ctx, int x, int y, guint time)
+{
+  GbkView *v = GBK_VIEW (w);
+  int width = gtk_widget_get_allocated_width (w);
+  set_autoscroll (v, x < DND_EDGE_PX ? -1 : x > width - DND_EDGE_PX ? 1 : 0);
+  GbkHandle folder;
+  bool ok = gtk_drag_dest_find_target (w, ctx, nullptr) != GDK_NONE
+            && drop_target (v, x, y, gtk_drag_get_source_widget (ctx) == w, &folder);
+  GdkDragAction action = ok ? gbk_dnd_action (ctx) : 0;
+  set_drop_hover (v, action != 0, ok ? folder : GBK_HANDLE_NONE);
+  gdk_drag_status (ctx, action, time);
+  return true;
+}
+
+static void
+gbk_view_drag_leave (GtkWidget *w, GdkDragContext *ctx G_GNUC_UNUSED, guint time G_GNUC_UNUSED)
+{
+  GbkView *v = GBK_VIEW (w);
+  set_autoscroll (v, 0);
+  set_drop_hover (v, false, GBK_HANDLE_NONE);
+}
+
+static gboolean
+gbk_view_drag_drop (GtkWidget *w, GdkDragContext *ctx, int x, int y, guint time)
+{
+  GbkView *v = GBK_VIEW (w);
+  set_autoscroll (v, 0);
+  GdkAtom target = gtk_drag_dest_find_target (w, ctx, nullptr);
+  GbkHandle folder;
+  if (target == GDK_NONE || !drop_target (v, x, y, gtk_drag_get_source_widget (ctx) == w, &folder))
+    {
+      gtk_drag_finish (ctx, false, false, time);
+      return true;
+    }
+  v->drop_folder = folder;
+  v->drop_requested = true;
+  gtk_drag_get_data (w, ctx, target, time);
+  return true;
+}
+
+static void
+deliver_drop (GbkView *v, GPtrArray *paths, GbkHandle folder, GdkEvent *trigger)
+{
+  if (paths->len > 0)
+    g_signal_emit (v, signals[SIGNAL_DROP], 0, paths, (guint64) folder, trigger);
+}
+
+static void
+gbk_view_drag_data_received (GtkWidget *w, GdkDragContext *ctx, int x G_GNUC_UNUSED,
+                             int y G_GNUC_UNUSED, GtkSelectionData *sd, guint info G_GNUC_UNUSED,
+                             guint time)
+{
+  GbkView *v = GBK_VIEW (w);
+  GbkHandle folder = v->drop_folder;
+  set_drop_hover (v, false, GBK_HANDLE_NONE);
+  if (!v->drop_requested)
+    return;
+  v->drop_requested = false;
+  g_autoptr (GPtrArray) paths = gbk_dnd_paths (sd);
+  /* del = false always: whatever the user picks, we do it; the source deletes nothing. */
+  gtk_drag_finish (ctx, paths->len > 0, false, time);
+  g_autoptr (GdkEvent) trigger = gtk_get_current_event ();
+  deliver_drop (v, paths, folder, trigger);
 }
 
 static gboolean
@@ -1011,7 +1263,8 @@ gbk_view_realize (GtkWidget *w)
     .wclass = GDK_INPUT_OUTPUT,
     .visual = gtk_widget_get_visual (w),
     .event_mask = gtk_widget_get_events (w) | GDK_EXPOSURE_MASK | GDK_BUTTON_PRESS_MASK
-                  | GDK_BUTTON_RELEASE_MASK | GDK_KEY_PRESS_MASK | GDK_SCROLL_MASK
+                  | GDK_BUTTON_RELEASE_MASK | GDK_BUTTON1_MOTION_MASK | GDK_KEY_PRESS_MASK
+                  | GDK_SCROLL_MASK
                   | GDK_SMOOTH_SCROLL_MASK | GDK_FOCUS_CHANGE_MASK,
   };
   GdkWindow *win = gdk_window_new (gtk_widget_get_parent_window (w), &attrs,
@@ -1126,6 +1379,7 @@ gbk_view_dispose (GObject *o)
 {
   GbkView *v = GBK_VIEW (o);
   gbk_source_cancel (&v->search_timeout);
+  gbk_source_cancel (&v->autoscroll);
   if (v->model != nullptr)
     {
       g_signal_handler_disconnect (v->model, v->model_changed_id);
@@ -1152,6 +1406,7 @@ gbk_view_finalize (GObject *o)
   g_array_unref (v->widths);
   g_hash_table_unref (v->selected);
   g_string_free (v->search, true);
+  g_clear_pointer (&v->drag_paths, g_ptr_array_unref);
   gbk_type_table_unref (v->types);
   G_OBJECT_CLASS (gbk_view_parent_class)->finalize (o);
 }
@@ -1172,6 +1427,16 @@ gbk_view_class_init (GbkViewClass *klass)
   wc->draw = gbk_view_draw;
   wc->style_updated = gbk_view_style_updated;
   wc->button_press_event = gbk_view_button_press;
+  wc->button_release_event = gbk_view_button_release;
+  wc->motion_notify_event = gbk_view_motion;
+  wc->drag_begin = gbk_view_drag_begin;
+  wc->drag_data_get = gbk_view_drag_data_get;
+  wc->drag_end = gbk_view_drag_end;
+  /* No drag_data_delete: we never delete files because a drop target asked. */
+  wc->drag_motion = gbk_view_drag_motion;
+  wc->drag_leave = gbk_view_drag_leave;
+  wc->drag_drop = gbk_view_drag_drop;
+  wc->drag_data_received = gbk_view_drag_data_received;
   wc->key_press_event = gbk_view_key_press;
   wc->scroll_event = gbk_view_scroll;
   wc->focus_in_event = gbk_view_focus_change;
@@ -1196,6 +1461,10 @@ gbk_view_class_init (GbkViewClass *klass)
                                                  G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
                                                  G_TYPE_NONE, 0);
 
+  signals[SIGNAL_DROP] = g_signal_new ("drop", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+                                       nullptr, nullptr, nullptr, G_TYPE_NONE, 3, G_TYPE_POINTER,
+                                       G_TYPE_UINT64, GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+
   /* Themes style icon views and their selection under these names. */
   gtk_widget_class_set_css_name (wc, "iconview");
 }
@@ -1215,6 +1484,10 @@ gbk_view_init (GbkView *v)
   v->icons_tried = g_array_new (false, true, sizeof (bool));
   v->row_h = ICON_SIZE + 2 * PAD_Y;
   v->rows = 1;
+  /* Flags 0: motion, highlighting and accepting are all ours (see dnd.h). */
+  gtk_drag_dest_set (GTK_WIDGET (v), 0, nullptr, 0, GBK_DND_ACTIONS);
+  g_autoptr (GtkTargetList) targets = gbk_dnd_dest_targets ();
+  gtk_drag_dest_set_target_list (GTK_WIDGET (v), targets);
 }
 
 GtkWidget *
@@ -1226,4 +1499,29 @@ gbk_view_new (GbkTypeTable *types)
   gbk_connect (G_OBJECT (v), gtk_icon_theme_get_default (), "changed",
                G_CALLBACK (on_icon_theme_changed), v);
   return GTK_WIDGET (v);
+}
+
+char *
+gbk_view_drag_uris (GbkView *v)
+{
+  g_autoptr (GPtrArray) paths = selected_paths (v);
+  return gbk_clip_format_uri_list (paths);
+}
+
+bool
+gbk_view_drop_target_at (GbkView *v, double x, double y, bool from_self, GbkHandle *folder)
+{
+  return drop_target (v, x, y, from_self, folder);
+}
+
+bool
+gbk_view_drop_for_test (GbkView *v, const char *uri_list, double x, double y, GdkEvent *trigger)
+{
+  GbkHandle folder;
+  if (!drop_target (v, x, y, false, &folder))
+    return false;
+  bool cut;
+  g_autoptr (GPtrArray) paths = gbk_clip_parse (uri_list, strlen (uri_list), false, &cut);
+  deliver_drop (v, paths, folder, trigger);
+  return paths->len > 0;
 }

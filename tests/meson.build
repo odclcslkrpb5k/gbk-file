@@ -14,6 +14,8 @@ test_env.set('GBK_ARTIFACTS', meson.project_source_root() / 'out' / 'artifacts')
 test_libs = [core_lib, lifetime_lib]
 gui_test_libs = [gui_lib, core_lib, lifetime_lib]
 gui_tests = ['view', 'window']
+# GUI tests drive real X input (XTest) where GTK only listens to the X server: drag and drop.
+gui_test_deps = deps + [dependency('x11'), dependency('xtst')]
 test_inc = [config_inc, core_inc]
 
 unit_tests = ['lifetime', 'filetype', 'natsort', 'dirmodel', 'scanner', 'command', 'config', 'menu', 'open', 'fileops', 'clip', 'job']
@@ -32,7 +34,7 @@ if not get_option('fuzzing')
     exe = executable('test-' + name, 'test-' + name + '.c',
       include_directories : test_inc,
       link_with : gui_test_libs,
-      dependencies : deps,
+      dependencies : gui_test_deps,
     )
     # One at a time: they share the Xvfb display.
     test(name, exe, env : test_env, protocol : 'tap', args : ['--tap'], timeout : 120,

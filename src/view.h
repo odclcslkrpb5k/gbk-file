@@ -15,7 +15,11 @@ G_DECLARE_FINAL_TYPE (GbkView, gbk_view, GBK, VIEW, GtkWidget)
  *   "selection-changed" (no args)
  *   "context-menu"      (GdkEvent *trigger, may be nullptr for keyboard) right-click or
  *                       Menu key. Selection already reflects the target: empty selection
- *                       means the current directory itself. */
+ *                       means the current directory itself.
+ *   "drop"              (GPtrArray *paths, guint64 folder, GdkEvent *trigger) local files
+ *                       were dropped; `folder` is the GbkHandle of the folder item they
+ *                       were dropped on, or GBK_HANDLE_NONE for the view's own folder.
+ *                       Nothing has been done with them: the handler decides (asks). */
 
 GtkWidget *gbk_view_new (GbkTypeTable *types);
 
@@ -62,3 +66,11 @@ const char *gbk_view_type_ahead_text (GbkView *v);   /* "" when idle */
 /* Layout introspection for tests. */
 size_t gbk_view_rows_per_column (GbkView *v);
 GbkHandle gbk_view_item_at (GbkView *v, double x, double y);   /* widget coordinates */
+
+/* Drag and drop (see dnd.h). What a drag of the current selection carries (uri-list). */
+[[nodiscard]] char *gbk_view_drag_uris (GbkView *v);
+/* Would a drop at (x, y) be accepted, and where (*folder: an item, or NONE for the view's
+ * folder)? `from_self`: the drag started in this view. */
+bool gbk_view_drop_target_at (GbkView *v, double x, double y, bool from_self, GbkHandle *folder);
+/* Tests: as if `uri_list` were dropped at (x, y) from another app. */
+bool gbk_view_drop_for_test (GbkView *v, const char *uri_list, double x, double y, GdkEvent *trigger);

@@ -1,4 +1,6 @@
 #include "pathbar.h"
+#include "cliptext.h"
+#include "dnd.h"
 #include "lifetime.h"
 
 #define KEY_PATH "gbk-path"
@@ -18,7 +20,7 @@ struct _GbkPathbar
 
 G_DEFINE_FINAL_TYPE (GbkPathbar, gbk_pathbar, GTK_TYPE_BOX)
 
-enum { SIGNAL_NAVIGATE, SIGNAL_CONTEXT_MENU, N_SIGNALS };
+enum { SIGNAL_NAVIGATE, SIGNAL_CONTEXT_MENU, SIGNAL_DROP, N_SIGNALS };
 static guint signals[N_SIGNALS];
 
 static bool
@@ -53,6 +55,60 @@ on_button_press (GtkWidget *button, GdkEventButton *ev, GbkPathbar *bar)
   return true;          /* no press/toggle for a right-click */
 }
 
+/* ---- drops onto buttons (see dnd.h): highlight, then hand the files to the window ---- */
+
+static gboolean
+on_drag_motion (GtkWidget *button, GdkDragContext *ctx, int x G_GNUC_UNUSED, int y G_GNUC_UNUSED,
+                guint time, GbkPathbar *bar G_GNUC_UNUSED)
+{
+  GdkDragAction action = gtk_drag_dest_find_target (button, ctx, nullptr) != GDK_NONE
+                           ? gbk_dnd_action (ctx) : 0;
+  if (action != 0)
+    gtk_drag_highlight (button);
+  gdk_drag_status (ctx, action, time);
+  return true;
+}
+
+static void
+on_drag_leave (GtkWidget *button, GdkDragContext *ctx G_GNUC_UNUSED, guint time G_GNUC_UNUSED,
+               GbkPathbar *bar G_GNUC_UNUSED)
+{
+  gtk_drag_unhighlight (button);
+}
+
+static gboolean
+on_drag_drop (GtkWidget *button, GdkDragContext *ctx, int x G_GNUC_UNUSED, int y G_GNUC_UNUSED,
+              guint time, GbkPathbar *bar G_GNUC_UNUSED)
+{
+  GdkAtom target = gtk_drag_dest_find_target (button, ctx, nullptr);
+  if (target == GDK_NONE)
+    gtk_drag_finish (ctx, false, false, time);
+  else
+    gtk_drag_get_data (button, ctx, target, time);
+  return true;
+}
+
+static void
+deliver_drop (GbkPathbar *bar, const char *path, GPtrArray *paths, GdkEvent *trigger)
+{
+  if (paths->len == 0)
+    return;
+  g_autofree char *copy = g_strdup (path);    /* the button may go while handlers run */
+  g_signal_emit (bar, signals[SIGNAL_DROP], 0, copy, paths, trigger);
+}
+
+static void
+on_drag_data_received (GtkWidget *button, GdkDragContext *ctx, int x G_GNUC_UNUSED,
+                       int y G_GNUC_UNUSED, GtkSelectionData *sd, guint info G_GNUC_UNUSED,
+                       guint time, GbkPathbar *bar)
+{
+  gtk_drag_unhighlight (button);
+  g_autoptr (GPtrArray) paths = gbk_dnd_paths (sd);
+  gtk_drag_finish (ctx, paths->len > 0, false, time);   /* never "delete the source" */
+  g_autoptr (GdkEvent) trigger = gtk_get_current_event ();
+  deliver_drop (bar, g_object_get_data (G_OBJECT (button), KEY_PATH), paths, trigger);
+}
+
 static GtkWidget *
 make_button (GbkPathbar *bar, const char *path, const char *label, const char *icon)
 {
@@ -69,6 +125,13 @@ make_button (GbkPathbar *bar, const char *path, const char *label, const char *i
   g_object_set_data_full (G_OBJECT (button), "gbk-label", g_strdup (label), g_free);
   gbk_connect (G_OBJECT (bar), button, "clicked", G_CALLBACK (on_button_clicked), bar);
   gbk_connect (G_OBJECT (bar), button, "button-press-event", G_CALLBACK (on_button_press), bar);
+  gtk_drag_dest_set (button, 0, nullptr, 0, GBK_DND_ACTIONS);
+  g_autoptr (GtkTargetList) targets = gbk_dnd_dest_targets ();
+  gtk_drag_dest_set_target_list (button, targets);
+  gbk_connect (G_OBJECT (bar), button, "drag-motion", G_CALLBACK (on_drag_motion), bar);
+  gbk_connect (G_OBJECT (bar), button, "drag-leave", G_CALLBACK (on_drag_leave), bar);
+  gbk_connect (G_OBJECT (bar), button, "drag-drop", G_CALLBACK (on_drag_drop), bar);
+  gbk_connect (G_OBJECT (bar), button, "drag-data-received", G_CALLBACK (on_drag_data_received), bar);
   return button;
 }
 
@@ -263,6 +326,15 @@ gbk_pathbar_entry (GbkPathbar *bar)
   return bar->entry;
 }
 
+void
+gbk_pathbar_drop_for_test (GbkPathbar *bar, const char *path, const char *uri_list,
+                           GdkEvent *trigger)
+{
+  bool cut;
+  g_autoptr (GPtrArray) paths = gbk_clip_parse (uri_list, strlen (uri_list), false, &cut);
+  deliver_drop (bar, path, paths, trigger);
+}
+
 /* ---- GObject ---- */
 
 static void
@@ -286,6 +358,9 @@ gbk_pathbar_class_init (GbkPathbarClass *klass)
                                                G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
                                                G_TYPE_NONE, 2, G_TYPE_STRING,
                                                GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  signals[SIGNAL_DROP] = g_signal_new ("drop", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+                                       nullptr, nullptr, nullptr, G_TYPE_NONE, 3, G_TYPE_STRING,
+                                       G_TYPE_POINTER, GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
 }
 
 static void

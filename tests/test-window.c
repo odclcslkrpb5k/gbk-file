@@ -1,5 +1,8 @@
 /* Browser window: navigation, history, hidden toggle, vanished directories (under Xvfb). */
 #include "lifetime.h"
+#include <gdk/gdkx.h>
+#include <X11/extensions/XTest.h>
+#include "cliptext.h"
 #include "job.h"
 #include "props.h"
 #include "window.h"
@@ -881,6 +884,258 @@ test_create_executable_properties (void)
   rm_rf (root);
 }
 
+/* ---- drag and drop ---- */
+
+/* A button press on `widget`'s window, standing in for the event GTK has during a drop. */
+static GdkEvent *
+fake_trigger (GtkWidget *widget, double x, double y)
+{
+  GdkEvent *ev = gdk_event_new (GDK_BUTTON_PRESS);
+  ev->button.window = g_object_ref (gtk_widget_get_window (widget));
+  ev->button.button = GDK_BUTTON_PRIMARY;
+  ev->button.x = x;
+  ev->button.y = y;
+  ev->button.time = GDK_CURRENT_TIME;
+  gdk_event_set_device (ev, gdk_seat_get_pointer (
+      gdk_display_get_default_seat (gtk_widget_get_display (widget))));
+  return ev;
+}
+
+static GtkMenu *
+only_menu (GtkWidget *attach)
+{
+  GList *menus = gtk_menu_get_for_attach_widget (attach);
+  if (g_list_length (menus) != 1)
+    gbk_fatal ("expected one menu, got %u", g_list_length (menus));
+  return menus->data;
+}
+
+static char *
+uris_of (const char *dir, const char *const *names)
+{
+  g_autoptr (GPtrArray) paths = g_ptr_array_new_with_free_func (g_free);
+  for (size_t i = 0; names[i] != nullptr; i++)
+    g_ptr_array_add (paths, g_build_filename (dir, names[i], nullptr));
+  return gbk_clip_format_uri_list (paths);
+}
+
+static bool
+both_exist (void *dir)
+{
+  g_autofree char *a = g_build_filename (dir, "a.txt", nullptr);
+  g_autofree char *b = g_build_filename (dir, "b.txt", nullptr);
+  return g_file_test (a, G_FILE_TEST_EXISTS) && g_file_test (b, G_FILE_TEST_EXISTS);
+}
+
+static bool
+neither_exists (void *dir)
+{
+  g_autofree char *a = g_build_filename (dir, "a.txt", nullptr);
+  g_autofree char *b = g_build_filename (dir, "b.txt", nullptr);
+  return !g_file_test (a, G_FILE_TEST_EXISTS) && !g_file_test (b, G_FILE_TEST_EXISTS);
+}
+
+/* No drag icon or menu left on screen. (GTK keeps empty 1x1 popups off-screen at
+ * -99,-99 for drag-and-drop messaging, and reuses them: those don't count.) */
+static bool
+no_popups_mapped (void *data G_GNUC_UNUSED)
+{
+  g_autoptr (GList) all = gtk_window_list_toplevels ();
+  for (GList *l = all; l != nullptr; l = l->next)
+    if (gtk_window_get_window_type (l->data) == GTK_WINDOW_POPUP && gtk_widget_get_mapped (l->data)
+        && gtk_bin_get_child (l->data) != nullptr)
+      return false;
+  return true;
+}
+
+static void
+test_drag_and_drop (void)
+{
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "src/", "src/a.txt", "src/b.txt", "dest/sub/", nullptr });
+  g_autofree char *src = g_build_filename (root, "src", nullptr);
+  g_autofree char *dest = g_build_filename (root, "dest", nullptr);
+  g_autofree char *sub = g_build_filename (dest, "sub", nullptr);
+  const char *const ab[] = { "a.txt", "b.txt", nullptr };
+  g_autofree char *uris = uris_of (src, ab);
+
+  GbkWindow *w = gbk_window_new (app, ctx, dest);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, dest);
+  GbkView *v = gbk_window_view (w);
+  GtkWidget *vw = GTK_WIDGET (v);
+  double far_x = gtk_widget_get_allocated_width (vw) - 5;   /* empty space */
+
+  /* Onto the folder "sub" (first item): asked, and Copy Here copies into it. */
+  g_autoptr (GdkEvent) t1 = fake_trigger (vw, 5, 2);
+  g_assert_true (gbk_view_drop_for_test (v, uris, 5, 2, t1));
+  GtkMenu *menu = only_menu (vw);
+  g_autofree char *labels = menu_labels (menu);
+  g_assert_cmpstr (labels, ==, "Move Here|Copy Here|-|Cancel");
+  g_assert_false (both_exist (sub));                 /* nothing happens before choosing */
+  choose (menu, "Copy Here");
+  g_assert_true (wait_until (both_exist, sub));
+  g_assert_true (both_exist (src));                   /* a copy: the originals stay */
+  g_assert_true (wait_until (menus_gone, w));
+
+  /* Cancel does nothing. */
+  g_autoptr (GdkEvent) t2 = fake_trigger (vw, far_x, 2);
+  g_assert_true (gbk_view_drop_for_test (v, uris, far_x, 2, t2));
+  choose (only_menu (vw), "Cancel");
+  g_assert_true (wait_until (menus_gone, w));
+  g_assert_true (neither_exists (dest));
+
+  /* Onto empty space: the folder itself. Move Here moves, and selects what arrived. */
+  g_autoptr (GdkEvent) t3 = fake_trigger (vw, far_x, 2);
+  g_assert_true (gbk_view_drop_for_test (v, uris, far_x, 2, t3));
+  choose (only_menu (vw), "Move Here");
+  g_assert_true (wait_until (both_exist, dest));
+  g_assert_true (wait_until (neither_exists, src));
+  NameCtx moved = { w, "a.txt" };
+  g_assert_true (wait_until (cursor_is, &moved));
+  g_assert_cmpuint (gbk_view_n_selected (v), ==, 2);
+  g_assert_true (wait_until (menus_gone, w));
+
+  /* Files dropped back into the folder they're in: no menu, nothing to do. */
+  g_autofree char *here = uris_of (dest, ab);
+  g_autoptr (GdkEvent) t4 = fake_trigger (vw, far_x, 2);
+  g_assert_true (gbk_view_drop_for_test (v, here, far_x, 2, t4));
+  g_assert_null (gtk_menu_get_for_attach_widget (vw));
+  g_assert_cmpstr (gbk_window_status (w), ==, "Already in this folder");
+
+  /* Onto a path bar button (the parent folder): asked the same way. */
+  GtkWidget *bar = GTK_WIDGET (gbk_window_pathbar (w));
+  g_autoptr (GdkEvent) t5 = fake_trigger (bar, 2, 2);
+  gbk_pathbar_drop_for_test (gbk_window_pathbar (w), root, here, t5);
+  menu = only_menu (bar);
+  g_autofree char *bar_labels = menu_labels (menu);
+  g_assert_cmpstr (bar_labels, ==, "Move Here|Copy Here|-|Cancel");
+  choose (menu, "Copy Here");
+  g_assert_true (wait_until (both_exist, root));
+  g_assert_true (both_exist (dest));
+  g_assert_true (wait_until (bar_menus_gone, bar));
+
+  /* Dragging out carries the selection as a uri-list. */
+  g_autofree char *dragged = gbk_view_drag_uris (v);
+  g_assert_cmpstr (dragged, ==, here);
+
+  gtk_widget_destroy (GTK_WIDGET (w));
+  rm_rf (root);
+}
+
+/* Real input, through the X server (XTest): during a drag GTK holds a pointer grab and
+ * only listens to the server, so events injected into GTK itself never reach it. */
+static Display *
+xdisplay (GtkWidget *w)
+{
+  return gdk_x11_display_get_xdisplay (gtk_widget_get_display (w));
+}
+
+static void
+x_move (GtkWidget *view, double x, double y)
+{
+  int rx, ry;
+  gdk_window_get_root_coords (gtk_widget_get_window (view), (int) x, (int) y, &rx, &ry);
+  XTestFakeMotionEvent (xdisplay (view), -1, rx, ry, CurrentTime);
+  XFlush (xdisplay (view));
+  settle ();
+}
+
+static void
+x_button (GtkWidget *view, bool press)
+{
+  XTestFakeButtonEvent (xdisplay (view), 1, press, CurrentTime);
+  XFlush (xdisplay (view));
+  settle ();
+}
+
+/* Where item `name` is drawn, in view coordinates. */
+static bool
+item_xy (GbkWindow *w, const char *name, double *x, double *y)
+{
+  GbkView *v = gbk_window_view (w);
+  GbkHandle h = gbk_dir_model_find (model_of (w), name);
+  int width = gtk_widget_get_allocated_width (GTK_WIDGET (v));
+  int height = gtk_widget_get_allocated_height (GTK_WIDGET (v));
+  for (int py = 2; py < height; py += 4)
+    for (int px = 2; px < width; px += 4)
+      if (gbk_view_item_at (v, px, py) == h)
+        {
+          *x = px + 2;
+          *y = py + 2;
+          return true;
+        }
+  return false;
+}
+
+static bool
+view_has_menu (void *v)
+{
+  return gtk_menu_get_for_attach_widget (v) != nullptr;
+}
+
+static bool
+moved_into_sub (void *root)
+{
+  g_autofree char *sub = g_build_filename (root, "sub", nullptr);
+  return both_exist (sub) && neither_exists (root);
+}
+
+/* The whole thing through GTK's real drag-and-drop, driven by real X input (pointer grab,
+ * X messages, selection transfer): press on one of two selected files, drag onto a folder
+ * in the same view, get asked, move both. */
+static void
+test_real_drag_and_drop (void)
+{
+  g_assert_true (wait_until (no_popups_mapped, nullptr));
+  g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
+  mkdirs (root, (const char *const[]) { "sub/", "a.txt", "b.txt", nullptr });
+  GbkWindow *w = gbk_window_new (app, ctx, root);
+  gtk_window_move (GTK_WINDOW (w), 0, 0);
+  gtk_widget_show_all (GTK_WIDGET (w));
+  wait_at (w, root);
+  settle ();
+  GtkWidget *vw = GTK_WIDGET (gbk_window_view (w));
+  double ax, ay, sx, sy;
+  g_assert_true (item_xy (w, "a.txt", &ax, &ay));
+  g_assert_true (item_xy (w, "sub", &sx, &sy));
+  GbkHandle both[] = { gbk_dir_model_find (model_of (w), "a.txt"),
+                       gbk_dir_model_find (model_of (w), "b.txt") };
+  gbk_view_set_selection (gbk_window_view (w), both, 2);
+
+  x_move (vw, ax, ay);
+  x_button (vw, true);
+  for (int i = 1; i <= 10; i++)
+    x_move (vw, ax + (sx - ax) * i / 10, ay + (sy - ay) * i / 10);
+  const char *art = g_getenv ("GBK_ARTIFACTS");
+  if (art != nullptr)                 /* the folder being hovered is outlined */
+    {
+      int ww = gtk_widget_get_allocated_width (vw), wh = gtk_widget_get_allocated_height (vw);
+      cairo_surface_t *surf = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, ww, wh);
+      cairo_t *cr = cairo_create (surf);
+      gtk_widget_draw (vw, cr);
+      cairo_destroy (cr);
+      g_autofree char *png = g_build_filename (art, "drop-hover.png", nullptr);
+      cairo_surface_write_to_png (surf, png);
+      cairo_surface_destroy (surf);
+    }
+  x_button (vw, false);
+  g_assert_true (wait_until (view_has_menu, vw));
+  g_assert_cmpuint (gbk_view_n_selected (gbk_window_view (w)), ==, 2);   /* dragged both */
+  /* Nothing has moved: we're asked first. */
+  g_autofree char *a = g_build_filename (root, "a.txt", nullptr);
+  g_assert_true (g_file_test (a, G_FILE_TEST_EXISTS));
+  GtkMenu *menu = gtk_menu_get_for_attach_widget (vw)->data;
+  g_autofree char *labels = menu_labels (menu);
+  g_assert_cmpstr (labels, ==, "Move Here|Copy Here|-|Cancel");
+  choose (menu, "Move Here");
+  g_assert_true (wait_until (moved_into_sub, root));
+  g_assert_true (wait_until (no_popups_mapped, nullptr));      /* drag icon, menu: gone */
+
+  gtk_widget_destroy (GTK_WIDGET (w));
+  rm_rf (root);
+}
+
 /* ---- file operations through the window ---- */
 
 static bool
@@ -1328,6 +1583,8 @@ main (int argc, char **argv)
   g_test_add_func ("/window/open-folder-elsewhere", test_open_folder_elsewhere);
   g_test_add_func ("/window/scroll-extent", test_scroll_extent);
   g_test_add_func ("/window/status-bar-menu", test_status_bar_menu);
+  g_test_add_func ("/window/drag-and-drop", test_drag_and_drop);
+  g_test_add_func ("/window/real-drag-and-drop", test_real_drag_and_drop);
   g_test_add_func ("/window/create-executable-properties", test_create_executable_properties);
   g_test_add_func ("/window/file-operations", test_file_operations);
   g_test_add_func ("/window/job-outlives-window", test_job_outlives_window);

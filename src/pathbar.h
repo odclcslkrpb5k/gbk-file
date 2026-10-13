@@ -9,7 +9,9 @@ G_DECLARE_FINAL_TYPE (GbkPathbar, gbk_pathbar, GBK, PATHBAR, GtkBox)
 
 /* Signals:
  *   "navigate"     (const char *path)   a button was clicked or a location was entered
- *   "context-menu" (const char *path, GdkEvent *trigger)   a button was right-clicked */
+ *   "context-menu" (const char *path, GdkEvent *trigger)   a button was right-clicked
+ *   "drop"         (const char *path, GPtrArray *paths, GdkEvent *trigger)   local files were
+ *                  dropped on the button for `path`; nothing has been done with them yet */
 
 GtkWidget *gbk_pathbar_new (void);
 void gbk_pathbar_set_path (GbkPathbar *bar, const char *path);
@@ -24,3 +26,6 @@ void gbk_pathbar_click (GbkPathbar *bar, const char *path);
 /* For tests: the button for `path`. */
 GtkWidget *gbk_pathbar_button (GbkPathbar *bar, const char *path);
 GtkEntry *gbk_pathbar_entry (GbkPathbar *bar);
+/* For tests: as if `uri_list` were dropped on the button for `path`. */
+void gbk_pathbar_drop_for_test (GbkPathbar *bar, const char *path, const char *uri_list,
+                                GdkEvent *trigger);
