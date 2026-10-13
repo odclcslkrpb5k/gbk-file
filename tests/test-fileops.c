@@ -357,6 +357,82 @@ test_free_name (void)
   g_assert_cmpstr (n3, ==, "plain (1)");
 }
 
+/* Copies keep what cp -a keeps: mode, times (files, folders, links), xattrs, hard links
+ * within the copy, special files. */
+static void
+test_copy_keeps_metadata (void)
+{
+  mk ("m/src/f.txt", "data");
+  mk ("m/src/sub/", nullptr);
+  mk ("m/dst/", nullptr);
+  g_autofree char *f = P ("m/src/f.txt");
+  g_autofree char *sub = P ("m/src/sub");
+  g_autofree char *srcdir = P ("m/src");
+  g_assert_cmpint (chmod (f, 0751), ==, 0);
+  g_assert_cmpint (chmod (sub, 02750), ==, 0);
+  g_autofree char *hard = P ("m/src/hard.txt");
+  g_assert_cmpint (link (f, hard), ==, 0);
+  g_autofree char *lnk = P ("m/src/link");
+  g_assert_cmpint (symlink ("f.txt", lnk), ==, 0);
+  g_autofree char *fifo = P ("m/src/fifo");
+  g_assert_cmpint (mkfifo (fifo, 0640), ==, 0);
+  bool have_xattr = setxattr (f, "user.gbk", "v1", 2, 0) == 0
+                    && setxattr (sub, "user.gbk", "v2", 2, 0) == 0;
+  if (!have_xattr)
+    g_test_message ("filesystem without user xattrs: not checking them");
+
+  struct timespec old[2] = { { .tv_sec = 1000000000 }, { .tv_sec = 1100000000, .tv_nsec = 123 } };
+  g_assert_cmpint (utimensat (AT_FDCWD, f, old, 0), ==, 0);
+  g_assert_cmpint (utimensat (AT_FDCWD, lnk, old, AT_SYMLINK_NOFOLLOW), ==, 0);
+  g_assert_cmpint (utimensat (AT_FDCWD, sub, old, 0), ==, 0);
+  g_assert_cmpint (utimensat (AT_FDCWD, srcdir, old, 0), ==, 0);   /* last: the rest touch it */
+
+  Script s = { 0 };
+  g_autoptr (GPtrArray) src = paths ("m/src", nullptr);
+  g_assert_true (run (GBK_OP_COPY, src, "m/dst", &s, nullptr));
+  g_assert_cmpint (s.errors, ==, 0);
+
+  struct stat a, b;
+  g_autofree char *cf = P ("m/dst/src/f.txt");
+  g_assert_cmpint (lstat (cf, &a), ==, 0);
+  g_assert_cmpint (a.st_mode & 07777, ==, 0751);
+  g_assert_cmpint (a.st_mtim.tv_sec, ==, 1100000000);
+  g_assert_cmpint (a.st_mtim.tv_nsec, ==, 123);
+  g_assert_cmpint (a.st_atim.tv_sec, ==, 1000000000);
+  g_assert_cmpuint (a.st_uid, ==, geteuid ());
+  /* The hard link is still one: same inode as the copied f.txt, not a second copy. */
+  g_autofree char *ch = P ("m/dst/src/hard.txt");
+  g_assert_cmpint (lstat (ch, &b), ==, 0);
+  g_assert_true (a.st_ino == b.st_ino && a.st_dev == b.st_dev);
+  g_assert_cmpuint (b.st_nlink, ==, 2);
+  /* Folders: mode (setgid included) and times, set after their contents. */
+  g_autofree char *csub = P ("m/dst/src/sub");
+  g_assert_cmpint (lstat (csub, &a), ==, 0);
+  g_assert_cmpint (a.st_mode & 07777, ==, 02750);
+  g_assert_cmpint (a.st_mtim.tv_sec, ==, 1100000000);
+  g_autofree char *cdir = P ("m/dst/src");
+  g_assert_cmpint (lstat (cdir, &a), ==, 0);
+  g_assert_cmpint (a.st_mtim.tv_sec, ==, 1100000000);
+  /* The symlink: a link, with its own times. */
+  g_autofree char *clnk = P ("m/dst/src/link");
+  g_assert_cmpint (lstat (clnk, &a), ==, 0);
+  g_assert_true (S_ISLNK (a.st_mode));
+  g_assert_cmpint (a.st_mtim.tv_sec, ==, 1100000000);
+  /* The FIFO is a FIFO (opening it to read would block forever). */
+  g_autofree char *cfifo = P ("m/dst/src/fifo");
+  g_assert_cmpint (lstat (cfifo, &a), ==, 0);
+  g_assert_true (S_ISFIFO (a.st_mode));
+  g_assert_cmpint (a.st_mode & 0777, ==, 0640);
+  if (have_xattr)
+    {
+      char v[8];
+      g_assert_cmpint (getxattr (cf, "user.gbk", v, sizeof v), ==, 2);
+      g_assert_cmpmem (v, 2, "v1", 2);
+      g_assert_cmpint (getxattr (csub, "user.gbk", v, sizeof v), ==, 2);
+      g_assert_cmpmem (v, 2, "v2", 2);
+    }
+}
+
 static void
 test_numbered_name (void)
 {
@@ -519,6 +595,7 @@ WRAP (test_trash)
 WRAP (test_errors_and_cancel)
 WRAP (test_rename)
 WRAP (test_free_name)
+WRAP (test_copy_keeps_metadata)
 WRAP (test_numbered_name)
 WRAP (test_create)
 WRAP (test_permissions)
@@ -535,6 +612,7 @@ main (int argc, char **argv)
   g_setenv ("GBK_TEST_ROOT", session, true);
 
   g_test_init (&argc, &argv, nullptr);
+  ADD ("/fileops/copy-keeps-metadata", test_copy_keeps_metadata);
   ADD ("/fileops/numbered-name", test_numbered_name);
   ADD ("/fileops/create", test_create);
   ADD ("/fileops/permissions", test_permissions);

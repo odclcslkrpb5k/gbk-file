@@ -12,6 +12,7 @@ typedef struct
   GbkChoice all_choice;
   bool incomplete;        /* something inside the current top-level item was skipped */
   uint64_t done, total;
+  GHashTable *links;      /* "dev:ino" -> first copy's path, for sources with nlink > 1 */
 } Ctx;
 
 /* ---- small helpers ---- */
@@ -158,6 +159,69 @@ is_within (const char *inner, const char *outer)
 
 /* ---- copying ---- */
 
+/* ---- keeping metadata, as cp -a does ---- */
+
+/* Owner and group; failing that (not root), the group alone; failing that, nothing. */
+static void
+keep_owner (int fd, const char *path, const struct stat *st)
+{
+  if (fd >= 0)
+    {
+      if (fchown (fd, st->st_uid, st->st_gid) != 0)
+        (void) !fchown (fd, (uid_t) -1, st->st_gid);
+    }
+  else if (fchownat (AT_FDCWD, path, st->st_uid, st->st_gid, AT_SYMLINK_NOFOLLOW) != 0)
+    (void) !fchownat (AT_FDCWD, path, (uid_t) -1, st->st_gid, AT_SYMLINK_NOFOLLOW);
+}
+
+/* Every extended attribute (user.*, ACLs, ...) the destination accepts. With fds when
+ * given, else by path without following a symlink. */
+static void
+keep_xattrs (int in, int out, const char *src, const char *dst)
+{
+  ssize_t n = in >= 0 ? flistxattr (in, nullptr, 0) : llistxattr (src, nullptr, 0);
+  if (n <= 0)
+    return;
+  g_autofree char *names = g_malloc ((size_t) n);
+  n = in >= 0 ? flistxattr (in, names, (size_t) n) : llistxattr (src, names, (size_t) n);
+  if (n <= 0)
+    return;                           /* changed meanwhile, or gone: keep nothing */
+  for (const char *name = names; name < names + n; name += strlen (name) + 1)
+    {
+      ssize_t len = in >= 0 ? fgetxattr (in, name, nullptr, 0) : lgetxattr (src, name, nullptr, 0);
+      if (len < 0)
+        continue;
+      g_autofree char *value = g_malloc ((size_t) len + 1);
+      len = in >= 0 ? fgetxattr (in, name, value, (size_t) len)
+                    : lgetxattr (src, name, value, (size_t) len);
+      if (len < 0)
+        continue;
+      if (out >= 0)
+        (void) !fsetxattr (out, name, value, (size_t) len, 0);
+      else
+        (void) !lsetxattr (dst, name, value, (size_t) len, 0);
+    }
+}
+
+/* Owner, attributes, mode, times on a path (folders, links, special files). Order matters:
+ * chown clears setuid/setgid, so the mode comes after it. Links have no mode of their own. */
+static void
+keep_metadata (const char *src, const char *dst, const struct stat *st)
+{
+  keep_owner (-1, dst, st);
+  keep_xattrs (-1, -1, src, dst);
+  if (!S_ISLNK (st->st_mode))
+    (void) !fchmodat (AT_FDCWD, dst, st->st_mode & 07777, 0);
+  struct timespec times[2] = { st->st_atim, st->st_mtim };
+  (void) !utimensat (AT_FDCWD, dst, times, AT_SYMLINK_NOFOLLOW);
+}
+
+static char *
+inode_key (const struct stat *st)
+{
+  return g_strdup_printf ("%ju:%ju", (uintmax_t) st->st_dev, (uintmax_t) st->st_ino);
+}
+
 /* Copy the bytes of open `in` to open `out`, with cancellation and progress. */
 static int
 copy_data (Ctx *c, int in, int out, const char *shown)
@@ -233,6 +297,11 @@ copy_file (Ctx *c, const char *src, const char *dst, const struct stat *st, bool
 
   g_autofree char *shown = g_filename_display_name (src);
   int err = copy_data (c, in, out, shown);
+  if (err == 0)
+    {
+      keep_owner (out, nullptr, st);
+      keep_xattrs (in, out, nullptr, nullptr);
+    }
   if (err == 0 && fchmod (out, st->st_mode & 07777) != 0)
     err = errno;
   struct timespec times[2] = { st->st_atim, st->st_mtim };
@@ -263,7 +332,7 @@ copy_file (Ctx *c, const char *src, const char *dst, const struct stat *st, bool
 }
 
 static bool
-copy_symlink (Ctx *c, const char *src, const char *dst, bool replace)
+copy_symlink (Ctx *c, const char *src, const char *dst, const struct stat *st, bool replace)
 {
   g_autoptr (GError) e = nullptr;
   g_autofree char *target = g_file_read_link (src, &e);
@@ -273,6 +342,7 @@ copy_symlink (Ctx *c, const char *src, const char *dst, bool replace)
     {
       if (symlink (target, dst) != 0)
         return fail_errno (c, dst, errno, "Can't create link");
+      keep_metadata (src, dst, st);
       return true;
     }
   g_autofree char *dir = g_path_get_dirname (dst);
@@ -280,7 +350,28 @@ copy_symlink (Ctx *c, const char *src, const char *dst, bool replace)
   g_autofree char *tmp = g_build_filename (dir, base, nullptr);
   if (symlink (target, tmp) != 0)
     return fail_errno (c, dst, errno, "Can't create link");
+  keep_metadata (src, tmp, st);
   if (rename (tmp, dst) != 0)
+    {
+      int err = errno;
+      unlink (tmp);
+      return fail_errno (c, dst, err, "Can't replace");
+    }
+  return true;
+}
+
+/* FIFOs, sockets, device nodes (devices need root: an error otherwise). */
+static bool
+copy_special (Ctx *c, const char *src, const char *dst, const struct stat *st, bool replace)
+{
+  g_autofree char *dir = g_path_get_dirname (dst);
+  g_autofree char *base = g_strdup_printf (TMP_PREFIX "%" G_GINT64_FORMAT, g_get_real_time ());
+  g_autofree char *tmp = replace ? g_build_filename (dir, base, nullptr) : nullptr;
+  const char *make = replace ? tmp : dst;
+  if (mknod (make, st->st_mode & (S_IFMT | 0600), st->st_rdev) != 0)
+    return fail_errno (c, dst, errno, "Can't create");
+  keep_metadata (src, make, st);
+  if (replace && rename (tmp, dst) != 0)
     {
       int err = errno;
       unlink (tmp);
@@ -309,11 +400,7 @@ copy_dir (Ctx *c, const char *src, const char *dst, const struct stat *st, bool 
         return false;
     }
   if (!merge)
-    {
-      chmod (dst, st->st_mode & 07777);
-      struct timespec times[2] = { st->st_atim, st->st_mtim };
-      utimensat (AT_FDCWD, dst, times, 0);
-    }
+    keep_metadata (src, dst, st);       /* last: filling it changed its times */
   return true;
 }
 
@@ -364,15 +451,25 @@ copy_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int d
         }
     }
 
+  /* Hard links among what's being copied stay hard links (the copies share one inode). */
+  g_autofree char *key = !S_ISDIR (st.st_mode) && st.st_nlink > 1 ? inode_key (&st) : nullptr;
+  const char *first_copy = key != nullptr ? g_hash_table_lookup (c->links, key) : nullptr;
   bool ok;
-  if (S_ISDIR (st.st_mode))
+  if (first_copy != nullptr && !replace && link (first_copy, dst) == 0)
+    {
+      ok = true;
+      c->done += S_ISREG (st.st_mode) ? (uint64_t) st.st_size : 0;   /* counted by measure() */
+    }
+  else if (S_ISDIR (st.st_mode))
     ok = copy_dir (c, src, dst, &st, replace, depth);
   else if (S_ISLNK (st.st_mode))
-    ok = copy_symlink (c, src, dst, replace);
+    ok = copy_symlink (c, src, dst, &st, replace);
   else if (S_ISREG (st.st_mode))
     ok = copy_file (c, src, dst, &st, replace);
   else
-    ok = fail_msg (c, src, G_IO_ERROR_NOT_SUPPORTED, "Special files can't be copied");
+    ok = copy_special (c, src, dst, &st, replace);
+  if (ok && key != nullptr && first_copy == nullptr)
+    g_hash_table_insert (c->links, g_steal_pointer (&key), g_strdup (dst));
 
   if (ok && !cancelled (c) && created != nullptr)
     g_ptr_array_add (created, g_strdup (final_name));
@@ -584,7 +681,8 @@ bool
 gbk_ops_run (GbkOpKind kind, GPtrArray *sources, const char *dest_dir,
              const GbkOpsHooks *hooks, GPtrArray *created, GError **error)
 {
-  Ctx c = { .h = hooks };
+  g_autoptr (GHashTable) links = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+  Ctx c = { .h = hooks, .links = links };
   bool bytes = kind == GBK_OP_COPY || kind == GBK_OP_MOVE;
 
   if (bytes)

@@ -9,6 +9,11 @@
  *   leaves a half-written file where a good one was.
  * - Symlinks are copied/moved/deleted as links, never followed. Deletion walks the tree
  *   with dirfds (openat/unlinkat, O_NOFOLLOW): a symlink can't redirect it elsewhere.
+ * - Copies are like `cp -a`: permissions, ownership, timestamps (files, folders and
+ *   links), extended attributes (so ACLs too), hard links within what's copied, and
+ *   special files (FIFOs, sockets; device nodes need root). As with cp -a, ownership and
+ *   attributes that can't be kept (not root; filesystem without xattrs) are silently
+ *   dropped. Sparse files are copied in full.
  * - A folder can't be copied or moved into itself.
  * - Directory depth is capped (GBK_OPS_MAX_DEPTH): deep trees fail cleanly instead of
  *   overflowing the stack. */
