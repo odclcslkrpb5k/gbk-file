@@ -1,6 +1,5 @@
-<img src="data/icons/io.github.odclcslkrpb5k.Quoin.svg" width="96" alt="" align="right">
-
 # Quoin
+<img src="data/icons/io.github.odclcslkrpb5k.Quoin.svg" width="96" alt="" align="right">
 
 A small, fast file manager for Linux desktops (X11, GTK 3), modelled on
 [Thunar](https://docs.xfce.org/xfce/thunar/start)'s compact view. It is written in C for
