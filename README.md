@@ -1,3 +1,5 @@
+<img src="data/icons/io.github.odclcslkrpb5k.Quoin.svg" width="96" alt="" align="right">
+
 # Quoin
 
 A small, fast file manager for Linux desktops (X11, GTK 3), modelled on
@@ -14,10 +16,11 @@ forme it locks the type in place. (Formerly gbk-file; the installer replaces an 
 curl -fsSL https://raw.githubusercontent.com/odclcslkrpb5k/quoin/main/install.sh | bash
 ```
 
-This installs the latest release into `~/.local`. It needs no root and copies two files:
+This installs the latest release into `~/.local`. It needs no root and copies three files:
 
 - `~/.local/bin/quoin`
 - `~/.local/share/applications/quoin.desktop`
+- `~/.local/share/icons/hicolor/scalable/apps/io.github.odclcslkrpb5k.Quoin.svg`
 
 Run the same command again to update. To make Quoin open folders by default:
 
@@ -34,7 +37,7 @@ example, `curl … | QUOIN_VERSION=<hash> bash`.
 | `QUOIN_PREFIX=<dir>` | Install under `<dir>` instead of `~/.local`. |
 | `QUOIN_ANY_OS=1` | Skip the Ubuntu 26.04 check (see below). |
 
-To uninstall, run `rm ~/.local/bin/quoin ~/.local/share/applications/quoin.desktop`.
+To uninstall, run `rm ~/.local/bin/quoin ~/.local/share/applications/quoin.desktop ~/.local/share/icons/hicolor/scalable/apps/io.github.odclcslkrpb5k.Quoin.svg`.
 
 **Supported systems.** Release binaries are built on **Ubuntu 26.04, x86_64**, against
 that release's GTK and GLib. The installer refuses other systems rather than leave you a

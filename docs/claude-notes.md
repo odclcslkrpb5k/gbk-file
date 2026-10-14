@@ -1,11 +1,14 @@
 # claude-notes
 
 NAME: **Quoin** (user, 2026-10-14; was gbk-file). Sister project gbk-markdown -> "Galley".
-Binary `quoin`, quoin.desktop, app id net.gbk.Quoin, config ~/.config/quoin/quoin.conf
+Binary `quoin`, quoin.desktop, app id io.github.odclcslkrpb5k.Quoin (= icon name, like
+Galley's io.github.odclcslkrpb5k.Galley), config ~/.config/quoin/quoin.conf
 (old gbk-file/gbk-file.conf moved across once by gbk_config_path_in), repo
 github.com/odclcslkrpb5k/quoin, installer env QUOIN_*; install.sh removes an old gbk-file
 install under the same prefix and moves the inode/directory default (default prefix only).
-Code prefix gbk_/Gbk stays. Local checkout dir is still ~/Projects/gbk-file.
+Code prefix gbk_/Gbk stays. ICON (2026-10-14): data/icons/io.github.odclcslkrpb5k.Quoin.svg,
+Galley's sibling (48 grid, tile #e9eff7 + navy #1f3b63 border, mid #3f6aa6): folder +
+wedge. Installed to hicolor/scalable/apps; release asset; window default icon name. Local checkout dir is still ~/Projects/gbk-file.
 
 Durable context for Claude. Read this first every session. Keep it current.
 

@@ -16,6 +16,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+icon=io.github.odclcslkrpb5k.Quoin.svg
 cmd=${1:-}
 
 # Image tag follows the Dockerfile content, so editing it forces a rebuild.
@@ -47,8 +48,8 @@ staged_release() {
   local dist=$root/out/dist/$hash
   rm -rf "$dist"
   mkdir -p "$dist"
-  cp "$bin" "$root/data/quoin.desktop.in" "$dist/"
-  (cd "$dist" && sha256sum quoin quoin.desktop.in > SHA256SUMS)
+  cp "$bin" "$root/data/quoin.desktop.in" "$root/data/icons/$icon" "$dist/"
+  (cd "$dist" && sha256sum quoin quoin.desktop.in "$icon" > SHA256SUMS)
   echo "$dist"
 }
 
@@ -78,7 +79,7 @@ publish_release() {
     --notes "Built from $full on Ubuntu 26.04 (x86_64), hardened release build; the full release gate (sanitizer tests, analyzer, fuzzing, hardened tests) passed.
 
 Install or update: \`curl -fsSL https://raw.githubusercontent.com/odclcslkrpb5k/quoin/main/install.sh | bash\`" \
-    "$dist/quoin" "$dist/quoin.desktop.in" "$dist/SHA256SUMS"
+    "$dist/quoin" "$dist/quoin.desktop.in" "$dist/$icon" "$dist/SHA256SUMS"
 }
 
 case "$cmd" in

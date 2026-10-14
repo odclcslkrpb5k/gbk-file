@@ -7,9 +7,13 @@ typedef struct
   char *start_path;
 } App;
 
+/* Also the icon's name (data/icons), as Galley's is. */
+#define APP_ID "io.github.odclcslkrpb5k.Quoin"
+
 static void
 on_activate (GtkApplication *gtk_app, App *app)
 {
+  gtk_window_set_default_icon_name (APP_ID);
   gbk_window_install_accels (gtk_app);
 
   GbkWindow *w = gbk_window_new (gtk_app, app->ctx, app->start_path);
@@ -41,7 +45,7 @@ main (int argc, char **argv)
 
   /* NON_UNIQUE: each invocation is its own process, so a crash can't take other windows
    * with it. We parse argv ourselves; GApplication gets none of it. */
-  GtkApplication *gtk_app = gtk_application_new ("net.gbk.Quoin", G_APPLICATION_NON_UNIQUE);
+  GtkApplication *gtk_app = gtk_application_new (APP_ID, G_APPLICATION_NON_UNIQUE);
   gbk_connect (G_OBJECT (gtk_app), gtk_app, "activate", G_CALLBACK (on_activate), &app);
   char *no_args[] = { argv[0], nullptr };
   int status = g_application_run (G_APPLICATION (gtk_app), 1, no_args);

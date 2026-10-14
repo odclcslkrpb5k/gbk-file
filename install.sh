@@ -30,6 +30,7 @@ main() {
   [[ -z $version || $version =~ ^[0-9a-f]{12}$ ]] \
     || die "QUOIN_VERSION must be a 12-character build hash, got: $version"
 
+  local icon=io.github.odclcslkrpb5k.Quoin.svg
   local src
   if [[ -n ${QUOIN_FROM:-} ]]; then
     src=$QUOIN_FROM
@@ -59,7 +60,7 @@ Or build from source: see https://github.com/$repo#building"
     # Expanded now: `src` is local and gone by the time the EXIT trap runs.
     trap "rm -rf '$src'" EXIT
     local f
-    for f in quoin quoin.desktop.in SHA256SUMS; do
+    for f in quoin quoin.desktop.in "$icon" SHA256SUMS; do
       curl -fsSL --proto '=https' --tlsv1.2 -o "$src/$f" "$base/$f" \
         || die "download failed: $base/$f"
     done
@@ -68,13 +69,14 @@ Or build from source: see https://github.com/$repo#building"
     (cd "$src" && sha256sum --quiet --strict -c SHA256SUMS) || die "checksum mismatch"
   fi
 
-  [[ -f $src/quoin && -f $src/quoin.desktop.in ]] || die "missing files in $src"
+  [[ -f $src/quoin && -f $src/quoin.desktop.in && -f $src/$icon ]] || die "missing files in $src"
   chmod 755 "$src/quoin"
   local got
   got=$("$src/quoin" --version) || die "the binary doesn't run here (missing libraries?)"
 
   local bindir=$prefix/bin appdir=$prefix/share/applications
-  mkdir -p "$bindir" "$appdir"
+  local icondir=$prefix/share/icons/hicolor/scalable/apps
+  mkdir -p "$bindir" "$appdir" "$icondir"
   # Copy beside the target, then rename over it: atomic, and running instances keep the old
   # file instead of seeing a half-written one.
   cp "$src/quoin" "$bindir/.quoin.new"
@@ -82,9 +84,13 @@ Or build from source: see https://github.com/$repo#building"
   mv -f "$bindir/.quoin.new" "$bindir/quoin"
   sed "s|@BIN@|$bindir/quoin|g" "$src/quoin.desktop.in" > "$appdir/.quoin.desktop.new"
   mv -f "$appdir/.quoin.desktop.new" "$appdir/quoin.desktop"
+  cp "$src/$icon" "$icondir/.$icon.new"
+  mv -f "$icondir/.$icon.new" "$icondir/$icon"
+  touch "$prefix/share/icons/hicolor"     # tells icon caches to look again
   say "installed $got"
   say "  $bindir/quoin"
   say "  $appdir/quoin.desktop"
+  say "  $icondir/$icon"
 
   # The same program under its old name, installed by this script before the rename.
   local old_default=false

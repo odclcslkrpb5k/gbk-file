@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- Quoin: a folder held fast by a quoin, the wedge that keeps cargo from shifting in a
+       ship's hold and locks type in a printer's forme. Drawn as Galley's sibling: same
+       ground, palette and rounded ends, so it reads on light and dark panels alike. -->
+  <rect x="1" y="1" width="46" height="46" rx="10" fill="#e9eff7" stroke="#1f3b63" stroke-width="1.5"/>
+  <!-- The folder: its back with the tab, then the front. -->
+  <path d="M9.5 10 H17.5 L20.5 13 H36.5 Q38.5 13 38.5 15 V33 Q38.5 35 36.5 35 H9.5 Q7.5 35 7.5 33 V12 Q7.5 10 9.5 10 Z" fill="#1f3b63"/>
+  <rect x="7.5" y="17" width="31" height="18" rx="2.5" fill="#3f6aa6"/>
+  <!-- The quoin, set against the folder's foot: a ground-coloured rim parts it from the
+       folder, then the wedge itself with its corners rounded. -->
+  <path d="M20 39.5 H40.5 V31.5 Z" fill="none" stroke="#e9eff7" stroke-width="4.5" stroke-linejoin="round"/>
+  <path d="M20 39.5 H40.5 V31.5 Z" fill="#1f3b63" stroke="#1f3b63" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>
