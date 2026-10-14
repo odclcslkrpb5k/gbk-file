@@ -376,9 +376,29 @@ gbk_config_load_file (const char *path, GPtrArray *errors)
 }
 
 char *
+gbk_config_path_in (const char *config_home)
+{
+  g_autofree char *dir = g_build_filename (config_home, "quoin", nullptr);
+  g_autofree char *path = g_build_filename (dir, "quoin.conf", nullptr);
+  g_autofree char *old_dir = g_build_filename (config_home, "gbk-file", nullptr);
+  g_autofree char *old = g_build_filename (old_dir, "gbk-file.conf", nullptr);
+  struct stat st;
+  if (lstat (path, &st) == 0 || lstat (old, &st) != 0)
+    return g_steal_pointer (&path);
+  /* Only the pre-rename file: move it across (never over anything), once. */
+  if ((mkdir (dir, 0700) == 0 || errno == EEXIST)
+      && renameat2 (AT_FDCWD, old, AT_FDCWD, path, RENAME_NOREPLACE) == 0)
+    {
+      rmdir (old_dir);                  /* only succeeds if nothing else was in there */
+      return g_steal_pointer (&path);
+    }
+  return g_steal_pointer (&old);        /* couldn't move it: read it where it is */
+}
+
+char *
 gbk_config_default_path (void)
 {
-  return g_build_filename (g_get_user_config_dir (), "gbk-file", "gbk-file.conf", nullptr);
+  return gbk_config_path_in (g_get_user_config_dir ());
 }
 
 /* ---- queries ---- */

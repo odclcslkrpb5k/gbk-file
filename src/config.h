@@ -1,4 +1,4 @@
-/* User configuration: ~/.config/gbk-file/gbk-file.conf, GLib key-file format.
+/* User configuration: ~/.config/quoin/quoin.conf, GLib key-file format.
  *
  * Strict by design: unknown sections or keys, bad values, and bad command templates are
  * errors. Any error rejects the whole file (defaults are used) and every problem is
@@ -39,8 +39,10 @@ typedef struct
 /* Load from a path. A missing file is not an error: defaults. */
 [[nodiscard]] GbkConfig *gbk_config_load_file (const char *path, GPtrArray *errors);
 
-/* $XDG_CONFIG_HOME/gbk-file/gbk-file.conf */
+/* $XDG_CONFIG_HOME/quoin/quoin.conf. If only the file from before the rename exists
+ * (gbk-file/gbk-file.conf), it's moved there first; if that fails, its path is returned. */
 char *gbk_config_default_path (void);
+char *gbk_config_path_in (const char *config_home);   /* the same, under `config_home` */
 
 void gbk_config_free (GbkConfig *c);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (GbkConfig, gbk_config_free)

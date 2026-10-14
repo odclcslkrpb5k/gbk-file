@@ -1570,7 +1570,7 @@ main (int argc, char **argv)
   g_setenv ("HOME", home, true);
   gtk_test_init (&argc, &argv, nullptr);
   ctx = gbk_context_new ("/nonexistent/gbk-test.conf");
-  app = gtk_application_new ("net.gbk.FileTest", G_APPLICATION_NON_UNIQUE);
+  app = gtk_application_new ("net.gbk.QuoinTest", G_APPLICATION_NON_UNIQUE);
   g_autoptr (GError) error = nullptr;
   if (!g_application_register (G_APPLICATION (app), nullptr, &error))
     gbk_fatal ("register: %s", error->message);

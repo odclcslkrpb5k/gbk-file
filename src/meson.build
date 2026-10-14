@@ -47,7 +47,7 @@ gui_lib = static_library('gbk-gui',
 
 core_inc = include_directories('.')
 
-executable('gbk-file', 'main.c',
+executable('quoin', 'main.c',
   include_directories : config_inc,
   link_with : [gui_lib, core_lib, lifetime_lib],
   dependencies : deps,

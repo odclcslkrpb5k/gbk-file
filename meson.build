@@ -1,4 +1,4 @@
-project('gbk-file', 'c',
+project('quoin', 'c',
   # The git hash, written by tools/in-container.sh before every setup. One source of truth:
   # meson's summary, --version and the binary all read it.
   version : files('out/VERSION'),

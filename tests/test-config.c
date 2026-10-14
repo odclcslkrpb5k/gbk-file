@@ -135,6 +135,47 @@ test_missing_file (void)
   g_assert_nonnull (c->terminal);
 }
 
+/* The config from before the rename (gbk-file/gbk-file.conf) moves to quoin/quoin.conf once;
+ * an existing new one is never touched. */
+static void
+test_old_location_moves (void)
+{
+  g_autofree char *home = g_dir_make_tmp ("gbk-conf-XXXXXX", nullptr);
+  g_autofree char *new_path = g_build_filename (home, "quoin", "quoin.conf", nullptr);
+  g_autofree char *old_dir = g_build_filename (home, "gbk-file", nullptr);
+  g_autofree char *old = g_build_filename (old_dir, "gbk-file.conf", nullptr);
+
+  g_autofree char *p0 = gbk_config_path_in (home);        /* nothing anywhere */
+  g_assert_cmpstr (p0, ==, new_path);
+  g_assert_false (g_file_test (new_path, G_FILE_TEST_EXISTS));
+
+  g_assert_cmpint (g_mkdir (old_dir, 0700), ==, 0);
+  g_assert_true (g_file_set_contents (old, "[General]\nShowHidden=true\n", -1, nullptr));
+  g_autofree char *p1 = gbk_config_path_in (home);
+  g_assert_cmpstr (p1, ==, new_path);
+  g_autofree char *moved = nullptr;
+  g_assert_true (g_file_get_contents (new_path, &moved, nullptr, nullptr));
+  g_assert_cmpstr (moved, ==, "[General]\nShowHidden=true\n");
+  g_assert_false (g_file_test (old_dir, G_FILE_TEST_EXISTS));   /* emptied, removed */
+
+  /* Both exist: the new one wins, the old one stays put. */
+  g_assert_cmpint (g_mkdir (old_dir, 0700), ==, 0);
+  g_assert_true (g_file_set_contents (old, "old", -1, nullptr));
+  g_autofree char *p2 = gbk_config_path_in (home);
+  g_assert_cmpstr (p2, ==, new_path);
+  g_assert_true (g_file_test (old, G_FILE_TEST_EXISTS));
+  g_autofree char *kept = nullptr;
+  g_assert_true (g_file_get_contents (new_path, &kept, nullptr, nullptr));
+  g_assert_cmpstr (kept, ==, moved);
+
+  unlink (old);
+  rmdir (old_dir);
+  unlink (new_path);
+  g_autofree char *new_dir = g_path_get_dirname (new_path);
+  rmdir (new_dir);
+  rmdir (home);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -144,5 +185,6 @@ main (int argc, char **argv)
   g_test_add_func ("/config/full", test_full);
   g_test_add_func ("/config/errors", test_errors);
   g_test_add_func ("/config/missing-file", test_missing_file);
+  g_test_add_func ("/config/old-location-moves", test_old_location_moves);
   return g_test_run ();
 }

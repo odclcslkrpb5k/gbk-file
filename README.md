@@ -1,37 +1,40 @@
-# gbk-file
+# Quoin
 
 A small, fast file manager for Linux desktops (X11, GTK 3), modelled on
 [Thunar](https://docs.xfce.org/xfce/thunar/start)'s compact view. It is written in C for
 one person's daily use. The goals are to start instantly, stay instant in huge folders,
 use little memory, and never crash.
 
+A *quoin* is a wedge: in a ship's hold it keeps the cargo from shifting, and in a printer's
+forme it locks the type in place. (Formerly gbk-file; the installer replaces an old install.)
+
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/odclcslkrpb5k/gbk-file/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/odclcslkrpb5k/quoin/main/install.sh | bash
 ```
 
 This installs the latest release into `~/.local`. It needs no root and copies two files:
 
-- `~/.local/bin/gbk-file`
-- `~/.local/share/applications/gbk-file.desktop`
+- `~/.local/bin/quoin`
+- `~/.local/share/applications/quoin.desktop`
 
-Run the same command again to update. To make gbk-file open folders by default:
+Run the same command again to update. To make Quoin open folders by default:
 
 ```sh
-xdg-mime default gbk-file.desktop inode/directory
+xdg-mime default quoin.desktop inode/directory
 ```
 
 The installer takes these options, set as environment variables before `bash`. For
-example, `curl … | GBK_VERSION=0b86673fc314 bash`.
+example, `curl … | QUOIN_VERSION=<hash> bash`.
 
 | Variable | Effect |
 | --- | --- |
-| `GBK_VERSION=<hash>` | Install a specific release instead of the latest. |
-| `GBK_PREFIX=<dir>` | Install under `<dir>` instead of `~/.local`. |
-| `GBK_ANY_OS=1` | Skip the Ubuntu 26.04 check (see below). |
+| `QUOIN_VERSION=<hash>` | Install a specific release instead of the latest. |
+| `QUOIN_PREFIX=<dir>` | Install under `<dir>` instead of `~/.local`. |
+| `QUOIN_ANY_OS=1` | Skip the Ubuntu 26.04 check (see below). |
 
-To uninstall, run `rm ~/.local/bin/gbk-file ~/.local/share/applications/gbk-file.desktop`.
+To uninstall, run `rm ~/.local/bin/quoin ~/.local/share/applications/quoin.desktop`.
 
 **Supported systems.** Release binaries are built on **Ubuntu 26.04, x86_64**, against
 that release's GTK and GLib. The installer refuses other systems rather than leave you a
@@ -50,7 +53,7 @@ program that won't start. On anything else, [build from source](#building).
 - **Tabs.** Each tab has its own path bar. Right-click a path bar button for that folder's
   menu.
 - **Drag and drop.** Drag files out to any application, which decides what to do with
-  them. Dropping files *into* gbk-file (onto a folder, empty space or a path bar button)
+  them. Dropping files *into* Quoin (onto a folder, empty space or a path bar button)
   always asks first: **Move Here**, **Copy Here** or **Cancel**, at the pointer. Nothing is
   moved by accident.
 - **Copies are like `cp -a`:** permissions, ownership (where allowed), timestamps,
@@ -103,7 +106,7 @@ path there; they never act on your files.
 
 ## Configuration
 
-The config file is `~/.config/gbk-file/gbk-file.conf`, in INI style. Every setting is
+The config file is `~/.config/quoin/quoin.conf`, in INI style. Every setting is
 optional. [`docs/example.conf`](docs/example.conf) documents them all, and the test suite
 loads it, so it always matches what the program accepts. You can set:
 
@@ -115,7 +118,7 @@ loads it, so it always matches what the program accepts. You can set:
 - right-click actions.
 
 The file is read strictly. One unknown key or bad value rejects the whole file, and
-gbk-file then reports every problem and uses the defaults, so a typo can't half-apply.
+Quoin then reports every problem and uses the defaults, so a typo can't half-apply.
 
 ## Building
 

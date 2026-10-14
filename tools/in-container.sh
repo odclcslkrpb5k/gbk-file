@@ -90,7 +90,7 @@ release() {
   # ./build install trusts only a build whose whole gate passed for this exact hash.
   printf '%s\n' "$GBK_VERSION" > out/release/released
   echo
-  echo "built: out/release/src/gbk-file ($(out/release/src/gbk-file --version))"
+  echo "built: out/release/src/quoin ($(out/release/src/quoin --version))"
 }
 
 bench() {

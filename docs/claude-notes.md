@@ -1,5 +1,12 @@
 # claude-notes
 
+NAME: **Quoin** (user, 2026-10-14; was gbk-file). Sister project gbk-markdown -> "Galley".
+Binary `quoin`, quoin.desktop, app id net.gbk.Quoin, config ~/.config/quoin/quoin.conf
+(old gbk-file/gbk-file.conf moved across once by gbk_config_path_in), repo
+github.com/odclcslkrpb5k/quoin, installer env QUOIN_*; install.sh removes an old gbk-file
+install under the same prefix and moves the inode/directory default (default prefix only).
+Code prefix gbk_/Gbk stays. Local checkout dir is still ~/Projects/gbk-file.
+
 Durable context for Claude. Read this first every session. Keep it current.
 
 ## Ground rules (from user, 2026-10-10)
@@ -303,7 +310,7 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   out/VERSION before every setup; meson.build reads it via project(version: files(...)),
   GBK_VERSION = meson.project_version(). (Was a separate build_id option -> meson summary
   printed "gbk-file undefined"; user spotted it.)
-- Repo is PUBLIC (user, 2026-10-12): github.com/odclcslkrpb5k/gbk-file. This notes file is
+- Repo is PUBLIC (user, 2026-10-12): github.com/odclcslkrpb5k/quoin. This notes file is
   public too — keep it free of anything private.
 - Distribution: prebuilt binaries (user's choice). install.sh (repo root) is THE installer:
   curl|bash downloads releases/latest (or GBK_VERSION) assets gbk-file, gbk-file.desktop.in,

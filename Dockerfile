@@ -1,4 +1,4 @@
-# Build environment for gbk-file. Everything (build, tests, analyzers) runs in here;
+# Build environment for Quoin. Everything (build, tests, analyzers) runs in here;
 # nothing on the workstation matters beyond Docker itself.
 #
 # The base must match the host distro release: the binary links against the system
