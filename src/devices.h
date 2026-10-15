@@ -1,9 +1,11 @@
 /* Devices: drives, partitions and phones that can be opened, mounted, unmounted or ejected,
  * as GIO's volume monitor sees them (udisks2 through gvfs where installed; otherwise the
- * system's mount table). System mounts (/, /boot, ...) are not devices. One per window.
+ * system's mount table), led by the root file system. Other system mounts (/boot, ...) are
+ * not devices. One per window.
  *
- * gbk_devices_menu() is the contents of the "Devices" submenu: one submenu per device,
- * holding Open, Unmount and Eject (or Safely Remove) as they apply. They activate
+ * gbk_devices_menu() is the contents of the "Devices" submenu: "File System" (/) first, as
+ * in Thunar, then one submenu per device, holding Open, Unmount and Eject (or Safely Remove)
+ * as they apply. They activate
  * win.device-open / win.device-unmount / win.device-eject with the device's id (a string).
  * The model follows plugging and unplugging while it is shown. Ids are never reused, so an
  * item left over from an older list names no device rather than the wrong one.

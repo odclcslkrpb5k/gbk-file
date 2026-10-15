@@ -653,10 +653,12 @@ test_menu (void)
 
   GbkWindow *w = gbk_window_new (app, ctx, media);
   gtk_widget_show_all (GTK_WIDGET (w));
-  /* Before the delay: nothing yet, and nothing activatable. */
+  /* Before the delay: only the file system, which needs no monitor. It opens /. */
   g_assert_false (gbk_devices_started (gbk_window_devices (w)));
-  expect_menu (w, "No devices");
-  g_assert_null (item_string (devices_menu (w), 0, G_MENU_ATTRIBUTE_ACTION));
+  expect_menu (w, "File System: Open");
+  device_action (w, "File System", "win.device-open");
+  g_assert_cmpstr (gbk_window_path (w), ==, "/");
+  gbk_window_open (w, media);
 
   fake_mounted_volume_add ("Stick_1", a, true);
   fake_volume_add ("Backup", "/nonexistent", true, 0);
@@ -665,17 +667,17 @@ test_menu (void)
   monitor_add_mount (share);
   g_object_unref (share);
   /* It starts on its own, a little after the window opens. */
-  expect_menu (w, "Stick__1: Open, Unmount, Eject | Backup (not mounted): Open | Share: Open, Unmount");
+  expect_menu (w, "File System: Open | Stick__1: Open, Unmount, Eject | Backup (not mounted): Open | Share: Open, Unmount");
   g_assert_true (gbk_devices_started (gbk_window_devices (w)));
 
   /* It follows changes. */
   monitor_remove_mount (share);
-  expect_menu (w, "Stick__1: Open, Unmount, Eject | Backup (not mounted): Open");
+  expect_menu (w, "File System: Open | Stick__1: Open, Unmount, Eject | Backup (not mounted): Open");
 
   /* Ids are never reused: a stale one, or one that isn't a device, does nothing. */
   g_autofree char *old = device_id (w, "Backup (not mounted)", "win.device-open");
   fake_volume_add ("Later", "/nonexistent", true, 0);
-  expect_menu (w, "Stick__1: Open, Unmount, Eject | Backup (not mounted): Open | Later (not mounted): Open");
+  expect_menu (w, "File System: Open | Stick__1: Open, Unmount, Eject | Backup (not mounted): Open | Later (not mounted): Open");
   const char *stale[] = { old, "", "x", "18446744073709551615" };
   for (size_t i = 0; i < G_N_ELEMENTS (stale); i++)
     g_action_group_activate_action (G_ACTION_GROUP (w), "device-open", g_variant_new_string (stale[i]));
@@ -701,7 +703,7 @@ test_open (void)
   FakeVolume *vd = fake_volume_add ("D", "/nonexistent", true, G_IO_ERROR_FAILED_HANDLED);
 
   GbkWindow *w = new_window (media);
-  expect_menu (w, "A: Open, Unmount | B (not mounted): Open | C (not mounted): Open | D (not mounted): Open");
+  expect_menu (w, "File System: Open | A: Open, Unmount | B (not mounted): Open | C (not mounted): Open | D (not mounted): Open");
 
   /* Mounted: opens in the tab. */
   device_action (w, "A", "win.device-open");
@@ -711,7 +713,7 @@ test_open (void)
   device_action (w, "B (not mounted)", "win.device-open");
   wait_tab (w, 0, b);
   g_assert_cmpint (vb->calls, ==, 1);
-  expect_menu (w, "A: Open, Unmount | B: Open, Unmount | C (not mounted): Open | D (not mounted): Open");
+  expect_menu (w, "File System: Open | A: Open, Unmount | B: Open, Unmount | C (not mounted): Open | D (not mounted): Open");
 
   /* Failing: says so, and stays put. */
   device_action (w, "C (not mounted)", "win.device-open");
@@ -749,7 +751,7 @@ check_removal (const char *action, const char *menu_after)
   gbk_window_new_tab (w, elsewhere);
   gbk_window_new_tab (w, a2);
   gbk_window_new_tab (w, a);
-  expect_menu (w, "A: Open, Unmount, Eject");
+  expect_menu (w, "File System: Open | A: Open, Unmount, Eject");
 
   /* Tabs on the device leave it first, and we wait for their readers to let go (the fake,
    * like the kernel, refuses while one still holds a folder there). Other tabs stay.
@@ -777,13 +779,13 @@ check_removal (const char *action, const char *menu_after)
 static void
 test_unmount (void)
 {
-  check_removal ("win.device-unmount", "A (not mounted): Open");
+  check_removal ("win.device-unmount", "File System: Open | A (not mounted): Open");
 }
 
 static void
 test_eject (void)
 {
-  check_removal ("win.device-eject", "A (not mounted): Open");
+  check_removal ("win.device-eject", "File System: Open | A (not mounted): Open");
 }
 
 /* Another program is using it: the system's refusal is shown. */
@@ -797,13 +799,13 @@ test_busy (void)
   ma->fail = G_IO_ERROR_BUSY;
 
   GbkWindow *w = new_window (media);
-  expect_menu (w, "A: Open, Unmount, Eject");
+  expect_menu (w, "File System: Open | A: Open, Unmount, Eject");
   device_action (w, "A", "win.device-unmount");
   expect_error ("Couldn't remove the device");
   device_action (w, "A", "win.device-eject");
   expect_error ("Couldn't remove the device");
   g_assert_cmpint (ma->calls, ==, 2);
-  expect_menu (w, "A: Open, Unmount, Eject");
+  expect_menu (w, "File System: Open | A: Open, Unmount, Eject");
 
   gtk_widget_destroy (GTK_WIDGET (w));
   end_fakes ();
@@ -822,7 +824,7 @@ test_unmounted_elsewhere (void)
 
   GbkWindow *w = new_window (sub);
   gbk_window_new_tab (w, media);
-  expect_menu (w, "A: Open, Unmount");
+  expect_menu (w, "File System: Open | A: Open, Unmount");
   g_signal_emit_by_name (monitor, "mount-pre-unmount", ma);
   wait_tab (w, 0, media);
   wait_tab (w, 1, media);
@@ -842,7 +844,7 @@ test_window_closes_mid_mount (void)
   FakeVolume *vb = fake_volume_add ("B", b, true, 0);
 
   GbkWindow *w = new_window (media);
-  expect_menu (w, "B (not mounted): Open");
+  expect_menu (w, "File System: Open | B (not mounted): Open");
   hold_mounts = true;
   device_action (w, "B (not mounted)", "win.device-open");
   wait_count (&vb->calls, 1);

@@ -373,7 +373,8 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   "Devices" submenu, each device a submenu Open / Unmount / Eject|Safely Remove). devices.{h,c}
   (core, GIO only): GbkDevices per window wraps GVolumeMonitor (gvfs udisks2 if installed,
   else unix mount table); listing = drives' volumes, driveless volumes, volumeless unshadowed
-  mounts; skipped if nothing can be done. Menu ids are a never-reused counter; unknown ids do
+  mounts; skipped if nothing can be done. "File System" (/) is ALWAYS first, Open only, even before the
+  monitor starts (user 2026-10-15: "No devices" looked wrong; Thunar lists it). No placeholder. Menu ids are a never-reused counter; unknown ids do
   nothing (actions reachable over D-Bus). Labels double "_" (mnemonics). Started
   GBK_WINDOW_DEVICES_DELAY_MS (300) after the window opens: g_volume_monitor_get costs ~20 ms
   of sync D-Bus with gvfs. "pre-unmount"(root) signal (ours AND gvfs mount-pre-unmount): window

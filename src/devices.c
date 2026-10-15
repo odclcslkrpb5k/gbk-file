@@ -128,14 +128,22 @@ add_volume (GbkDevices *d, GPtrArray *out, GDrive *drive, GVolume *volume)
   add_device (d, out, drive, volume, mount);
 }
 
-/* Drives in the monitor's order with their volumes, then volumes without a drive, then
- * mounts without a volume (fstab "user" mounts, network folders): what Thunar lists.
- * A drive without volumes (an empty card reader, a disk with only system partitions) is
- * nothing to open. */
+/* "File System" (/) first, always (it needs no monitor). Then drives in the monitor's order
+ * with their volumes, volumes without a drive, and mounts without a volume (fstab "user"
+ * mounts, network folders): what Thunar lists. A drive without volumes (an empty card
+ * reader, a disk with only system partitions) is nothing to open. */
 static GPtrArray *
 collect (GbkDevices *d)
 {
   GPtrArray *out = g_ptr_array_new_with_free_func ((GDestroyNotify) device_free);
+  Device *root = g_new0 (Device, 1);
+  root->id = g_strdup_printf ("%" G_GUINT64_FORMAT, d->next_id++);
+  root->name = g_strdup ("File System");
+  root->root = g_strdup ("/");
+  g_ptr_array_add (out, root);
+  if (d->monitor == nullptr)
+    return out;
+
   GList *drives = g_volume_monitor_get_connected_drives (d->monitor);
   for (GList *l = drives; l != nullptr; l = l->next)
     {
@@ -204,11 +212,10 @@ rebuild_menu (GbkDevices *d)
       if (dev->eject != EJECT_NONE)
         append_action (sub, dev->eject == STOP_DRIVE ? "Safely Remove" : "Eject",
                        "win.device-eject", dev->id);
-      g_autofree char *label = menu_label (dev->name, dev->mount == nullptr ? " (not mounted)" : "");
+      bool mounted = dev->mount != nullptr || dev->root != nullptr;
+      g_autofree char *label = menu_label (dev->name, mounted ? "" : " (not mounted)");
       g_menu_append_submenu (d->menu, label, G_MENU_MODEL (sub));
     }
-  if (d->devices->len == 0)
-    g_menu_append (d->menu, "No devices", nullptr);   /* no action: shown greyed out */
 }
 
 static void
@@ -549,7 +556,7 @@ static void
 gbk_devices_init (GbkDevices *d)
 {
   d->menu = g_menu_new ();
-  d->devices = g_ptr_array_new_with_free_func ((GDestroyNotify) device_free);
+  d->devices = collect (d);   /* just "File System" until started */
   rebuild_menu (d);
 }
 
