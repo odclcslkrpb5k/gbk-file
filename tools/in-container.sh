@@ -20,13 +20,17 @@ start_x() {
   [[ -n ${DISPLAY:-} ]] && return
   Xvfb :99 -screen 0 1280x800x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
   local pid=$!
-  trap "kill $pid 2>/dev/null" EXIT
   for _ in $(seq 100); do
     [[ -e /tmp/.X11-unix/X99 ]] && break
     sleep 0.05
   done
   export DISPLAY=:99 GDK_BACKEND=x11
-  # No session bus or a11y bus in the container: keep GTK from trying (and warning).
+  # A private session bus, as every desktop has (GTK's mount dialogs ask it for a handler).
+  local bus
+  bus=$(dbus-daemon --session --fork --print-address=1 --print-pid=1)
+  export DBUS_SESSION_BUS_ADDRESS=${bus%%$'\n'*}
+  trap "kill $pid ${bus##*$'\n'} 2>/dev/null" EXIT
+  # No a11y bus or dconf in the container: keep GTK from trying (and warning).
   export NO_AT_BRIDGE=1 GTK_A11Y=none GSETTINGS_BACKEND=memory
   mkdir -p out/artifacts
 }
@@ -86,7 +90,7 @@ release() {
   meson test -C out/release --print-errorlogs
   # The GUI suites again, several times: a test that reads state before the main loop has
   # delivered it passes or fails by timing, and the fast release build is where it shows.
-  meson test -C out/release --print-errorlogs --repeat 3 window view
+  meson test -C out/release --print-errorlogs --repeat 3 window view devices
   # ./build install trusts only a build whose whole gate passed for this exact hash.
   printf '%s\n' "$GBK_VERSION" > out/release/released
   echo

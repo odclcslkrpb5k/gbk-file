@@ -61,6 +61,10 @@ program that won't start. On anything else, [build from source](#building).
 - **Copies are like `cp -a`:** permissions, ownership (where allowed), timestamps,
   extended attributes and ACLs, hard links within the copy, and special files are kept.
 - **Create files and folders** from the right-click menu on empty space.
+- **Devices** in the ☰ menu: USB sticks, other partitions, phones and the like. Open one
+  (mounting it first if needed, with a password prompt if the system asks), unmount it, or
+  eject it. Before a device is unmounted, tabs showing it move off it, so Quoin itself
+  never keeps it busy. Uses udisks2 through gvfs where installed, as Thunar does.
 - **Properties** (right-click menu or Alt+Enter): dates (modified, accessed, changed,
   created), size, owner, group, link target, and read / write / execute permissions you can
   change with Apply. For files, the right-click menu also has an **Executable** check

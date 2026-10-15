@@ -13,7 +13,7 @@ test_env.set('GBK_ARTIFACTS', meson.project_source_root() / 'out' / 'artifacts')
 
 test_libs = [core_lib, lifetime_lib]
 gui_test_libs = [gui_lib, core_lib, lifetime_lib]
-gui_tests = ['view', 'window']
+gui_tests = ['view', 'window', 'devices']
 # GUI tests drive real X input (XTest) where GTK only listens to the X server: drag and drop.
 gui_test_deps = deps + [dependency('x11'), dependency('xtst')]
 test_inc = [config_inc, core_inc]

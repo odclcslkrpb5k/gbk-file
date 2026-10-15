@@ -1,5 +1,6 @@
 #include "window.h"
 #include "clipboard.h"
+#include "devices.h"
 #include "cliptext.h"
 #include "jobui.h"
 #include "lifetime.h"
@@ -23,6 +24,7 @@ struct _GbkWindow
   char *paste_dest;       /* destination of the paste request in flight */
   GtkGesture *mouse_back;     /* mouse buttons 8/9, caught before any child sees them */
   GtkGesture *mouse_forward;
+  GbkDevices *devices;    /* the ☰ menu's Devices submenu, and its operations */
 };
 
 G_DEFINE_FINAL_TYPE (GbkWindow, gbk_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -155,7 +157,7 @@ update_tabs_visible (GbkWindow *w)
 }
 
 static void on_activate (GbkView *v, GbkWindow *w);
-static GtkWidget *app_menu_button (void);
+static GtkWidget *app_menu_button (GbkWindow *w);
 static void on_context_menu (GbkView *v, GdkEvent *event, GbkWindow *w);
 static void on_pathbar_menu (GbkPathbar *bar, const char *path, GdkEvent *event, GbkWindow *w);
 static void on_view_drop (GbkView *v, GPtrArray *paths, guint64 folder, GdkEvent *trigger,
@@ -182,7 +184,7 @@ add_tab (GbkWindow *w, const char *path, bool switch_to)
 
   /* The window's menu button leads each tab's toolbar row (so it's there with one tab and
    * the tab strip hidden). Its actions are window actions, shared by every tab. */
-  GtkWidget *menu_button = app_menu_button ();
+  GtkWidget *menu_button = app_menu_button (w);
   gtk_box_pack_start (gbk_browser_toolbar (b), menu_button, false, false, 0);
   gtk_box_reorder_child (gbk_browser_toolbar (b), menu_button, 0);
 
@@ -1010,6 +1012,85 @@ ACTION (action_forward) { gbk_browser_forward (active (data)); }
 ACTION (action_up) { gbk_browser_up (active (data)); }
 ACTION (action_home) { gbk_browser_open (active (data), g_get_home_dir ()); }
 
+/* ---- devices ---- */
+
+/* A device's folders are about to go away (our unmount, or another program's): tabs
+ * showing one move to the folder that holds the mount point, letting go of the device. */
+static void
+on_pre_unmount (GbkDevices *d G_GNUC_UNUSED, const char *root, GbkWindow *w)
+{
+  g_autofree char *outside = g_path_get_dirname (root);
+  for (int i = 0; i < gtk_notebook_get_n_pages (w->tabs); i++)
+    {
+      GbkBrowser *b = GBK_BROWSER (gtk_notebook_get_nth_page (w->tabs, i));
+      if (gbk_path_is_under (gbk_browser_path (b), root))
+        gbk_browser_open (b, outside);
+    }
+}
+
+static bool
+start_devices (void *data)
+{
+  GbkWindow *w = data;
+  gbk_devices_start (w->devices);
+  return false;
+}
+
+static bool
+error_shown (const GError *error)
+{
+  /* Already told (GtkMountOperation's own dialog), or the password prompt was cancelled. */
+  return g_error_matches (error, G_IO_ERROR, G_IO_ERROR_FAILED_HANDLED)
+         || g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED);
+}
+
+static void
+device_opened (GObject *owner, const char *path, const GError *error)
+{
+  GbkWindow *w = GBK_WINDOW (owner);
+  if (error == nullptr)
+    gbk_browser_open (active (w), path);
+  else if (!error_shown (error))
+    gbk_jobui_error (GTK_WINDOW (w), "Couldn't open the device", error->message);
+}
+
+static void
+device_removed (GObject *owner, const char *path G_GNUC_UNUSED, const GError *error)
+{
+  if (error != nullptr && !error_shown (error))
+    gbk_jobui_error (GTK_WINDOW (owner), "Couldn't remove the device", error->message);
+}
+
+typedef bool (*DeviceOp) (GbkDevices *d, const char *id, GMountOperation *op, GObject *owner,
+                          GbkDeviceDone done);
+
+/* Ids that name no device (an item from a list that has since changed, or a stray D-Bus
+ * activation) do nothing. */
+static void
+device_action (GbkWindow *w, GVariant *param, DeviceOp fn, GbkDeviceDone done)
+{
+  g_autoptr (GMountOperation) op = gtk_mount_operation_new (GTK_WINDOW (w));
+  (void) fn (w->devices, g_variant_get_string (param, nullptr), op, G_OBJECT (w), done);
+}
+
+static void
+action_device_open (GSimpleAction *a G_GNUC_UNUSED, GVariant *param, void *data)
+{
+  device_action (data, param, gbk_devices_open, device_opened);
+}
+
+static void
+action_device_unmount (GSimpleAction *a G_GNUC_UNUSED, GVariant *param, void *data)
+{
+  device_action (data, param, gbk_devices_unmount, device_removed);
+}
+
+static void
+action_device_eject (GSimpleAction *a G_GNUC_UNUSED, GVariant *param, void *data)
+{
+  device_action (data, param, gbk_devices_eject, device_removed);
+}
+
 ACTION (action_terminal)
 {
   GbkWindow *w = data;
@@ -1128,6 +1209,9 @@ static const GActionEntry actions[] = {
   { .name = "next-tab", .activate = action_next_tab },
   { .name = "prev-tab", .activate = action_prev_tab },
   { .name = "location", .activate = action_location },
+  { .name = "device-open", .parameter_type = "s", .activate = action_device_open },
+  { .name = "device-unmount", .parameter_type = "s", .activate = action_device_unmount },
+  { .name = "device-eject", .parameter_type = "s", .activate = action_device_eject },
   /* Stateful: no activate handler means a boolean toggles / a string is set. */
   { .name = "show-hidden", .state = "false", .change_state = change_show_hidden },
   { .name = "sort", .parameter_type = "s", .state = "'name'", .change_state = change_sort },
@@ -1225,6 +1309,7 @@ gbk_window_dispose (GObject *o)
   /* Gestures aren't owned by their widget in GTK 3: release them while it's still whole. */
   g_clear_object (&w->mouse_back);
   g_clear_object (&w->mouse_forward);
+  g_clear_object (&w->devices);
   G_OBJECT_CLASS (gbk_window_parent_class)->dispose (o);
 }
 
@@ -1251,12 +1336,13 @@ gbk_window_init (GbkWindow *w G_GNUC_UNUSED)
 }
 
 static GtkWidget *
-app_menu_button (void)
+app_menu_button (GbkWindow *w)
 {
   g_autoptr (GMenu) menu = g_menu_new ();
   g_autoptr (GMenu) s1 = g_menu_new ();
   g_menu_append (s1, "New Tab", "win.new-tab");
   g_menu_append (s1, "New Window", "win.new-window");
+  g_menu_append_submenu (s1, "Devices", gbk_devices_menu (w->devices));
   g_menu_append_section (menu, nullptr, G_MENU_MODEL (s1));
   g_autoptr (GMenu) s2 = g_menu_new ();
   g_menu_append (s2, "Show Hidden Files", "win.show-hidden");
@@ -1290,6 +1376,8 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   w->show_hidden = ctx->config->show_hidden;
   w->sort = ctx->config->sort;
   g_action_map_add_action_entries (G_ACTION_MAP (w), actions, G_N_ELEMENTS (actions), w);
+  w->devices = gbk_devices_new ();
+  gbk_connect (G_OBJECT (w), w->devices, "pre-unmount", G_CALLBACK (on_pre_unmount), w);
   gtk_window_set_default_size (GTK_WINDOW (w), 700, 440);
 
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -1351,6 +1439,8 @@ gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
   set_sort (w, w->sort);
   add_tab (w, path, true);
   update_chrome (w);
+  /* The device list costs a blocking D-Bus round trip or two: not before the first folder. */
+  gbk_timeout_add (G_OBJECT (w), GBK_WINDOW_DEVICES_DELAY_MS, start_devices, w);
   return w;
 }
 
@@ -1370,6 +1460,21 @@ const char *
 gbk_window_path (GbkWindow *w)
 {
   return gbk_browser_path (active (w));
+}
+
+const char *
+gbk_window_tab_path (GbkWindow *w, int i)
+{
+  GtkWidget *b = gtk_notebook_get_nth_page (w->tabs, i);
+  if (b == nullptr)
+    gbk_fatal ("no tab %d", i);
+  return gbk_browser_path (GBK_BROWSER (b));
+}
+
+GbkDevices *
+gbk_window_devices (GbkWindow *w)
+{
+  return w->devices;
 }
 
 GbkView *

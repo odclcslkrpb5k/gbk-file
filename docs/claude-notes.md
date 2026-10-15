@@ -369,6 +369,24 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   x11+xtst): fake motion/buttons at root coords. Synthetic drag + gtk_drag_cancel leaves
   icon popups mapped forever -> don't. GTK keeps empty 1x1 popups at -99,-99 for DnD IPC:
   "no popups" checks must ignore childless popups. Xvfb has no WM: windows stack at 0,0.
+- DEVICES (user, 2026-10-15: Thunar's sidebar Devices list, in the ☰ menu; user chose ONE
+  "Devices" submenu, each device a submenu Open / Unmount / Eject|Safely Remove). devices.{h,c}
+  (core, GIO only): GbkDevices per window wraps GVolumeMonitor (gvfs udisks2 if installed,
+  else unix mount table); listing = drives' volumes, driveless volumes, volumeless unshadowed
+  mounts; skipped if nothing can be done. Menu ids are a never-reused counter; unknown ids do
+  nothing (actions reachable over D-Bus). Labels double "_" (mnemonics). Started
+  GBK_WINDOW_DEVICES_DELAY_MS (300) after the window opens: g_volume_monitor_get costs ~20 ms
+  of sync D-Bus with gvfs. "pre-unmount"(root) signal (ours AND gvfs mount-pre-unmount): window
+  moves tabs under root to dirname(root). Unmount/eject then WAIT until
+  gbk_scanner_busy_under(roots) is false (scanner keeps a live-worker registry; up to
+  GBK_DEVICES_RELEASE_MS) — our own dirfd would make it EBUSY. Mutation-checked with
+  gbk_scanner_set_release_delay_for_test (without the delay the race always won and the
+  mutation survived). Async ops hold a GWeakRef on the window. FAILED_HANDLED/CANCELLED
+  errors are not shown (GtkMountOperation already did). gtk_mount_operation_new does a SYNC
+  session-bus call and g_criticals without a bus -> the container now runs a private
+  dbus-daemon (Dockerfile dbus-daemon; in-container.sh start_x). tests/test-devices.c fakes
+  GVolumeMonitor/GVolume/GMount (folders as mounts). Fake fail code 0 == G_IO_ERROR_FAILED:
+  0 means "succeed" there (bit me once).
 - MY RECURRING SLIP: filtering build output (grep) hid failures/compile errors twice.
   Always: set -o pipefail; ./build X > out/build.log; echo exit; grep error: too.
 - Not built yet (proposed 2026-10-11): New Folder/New File, rubber-band selection, drag and

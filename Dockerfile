@@ -12,7 +12,7 @@ RUN apt-get update \
       gcc libc6-dev meson ninja-build pkgconf \
       clang llvm libclang-rt-dev \
       libgtk-3-dev \
-      xvfb xauth libxtst-dev \
+      xvfb xauth libxtst-dev dbus-daemon \
       fonts-dejavu-core adwaita-icon-theme librsvg2-common \
  && rm -rf /var/lib/apt/lists/*
 

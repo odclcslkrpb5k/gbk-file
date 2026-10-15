@@ -56,8 +56,17 @@ void gbk_scanner_stop (GbkScanner *s);
 /* Worker threads that haven't exited yet (tests wait for 0). */
 int gbk_scanner_live_workers (void);
 
+/* A worker for `root` or a folder under it hasn't exited yet, so it may still hold that
+ * folder open (which makes unmounting fail as busy). */
+bool gbk_scanner_busy_under (const char *root);
+
+/* `path` is `root` or inside it, by name ("/a/bc" is not inside "/a/b"). Absolute paths. */
+bool gbk_path_is_under (const char *path, const char *root);
+
 /* Test hooks: lower the pending-name cap (forces the rescan path); count rescans. */
 void gbk_scanner_set_pending_max_for_test (unsigned n);
+/* Workers keep their folder open this long after finishing (a slow device). */
+void gbk_scanner_set_release_delay_for_test (unsigned ms);
 int gbk_scanner_rescans (void);
 
 /* Tunables, exposed for tests. */

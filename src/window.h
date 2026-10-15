@@ -3,6 +3,7 @@
 #pragma once
 
 #include "browser.h"
+#include "devices.h"
 #include "pathbar.h"
 
 #define GBK_TYPE_WINDOW (gbk_window_get_type ())
@@ -25,4 +26,9 @@ GtkButton *gbk_window_sort_button (GbkWindow *w);
 GtkWidget *gbk_window_status_bar (GbkWindow *w);
 GtkToggleButton *gbk_window_hidden_button (GbkWindow *w);
 int gbk_window_n_tabs (GbkWindow *w);
+const char *gbk_window_tab_path (GbkWindow *w, int i);   /* tab `i`'s folder */
 GbkPathbar *gbk_window_pathbar (GbkWindow *w);
+/* The ☰ menu's Devices list. It starts following the system this long after the window
+ * opens (the first folder comes first). */
+GbkDevices *gbk_window_devices (GbkWindow *w);
+#define GBK_WINDOW_DEVICES_DELAY_MS 300

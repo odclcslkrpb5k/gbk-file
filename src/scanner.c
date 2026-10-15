@@ -17,13 +17,24 @@ struct GbkScanner
 };
 
 static int live_workers;
+/* Workers that haven't exited yet (each holds its folder open until then), for
+ * gbk_scanner_busy_under. Entries are borrowed: a worker keeps its own reference. */
+static GMutex live_lock;
+static GPtrArray *live_scanners;      /* GbkScanner*; under live_lock */
 static int pending_max = GBK_SCAN_PENDING_MAX;        /* atomic */
 static int rescans;                                   /* atomic */
+static int release_delay_ms;                          /* atomic; tests */
 
 void
 gbk_scanner_set_pending_max_for_test (unsigned n)
 {
   g_atomic_int_set (&pending_max, (int) MIN (n, (unsigned) INT_MAX));
+}
+
+void
+gbk_scanner_set_release_delay_for_test (unsigned ms)
+{
+  g_atomic_int_set (&release_delay_ms, (int) MIN (ms, (unsigned) INT_MAX));
 }
 
 int
@@ -36,6 +47,45 @@ int
 gbk_scanner_live_workers (void)
 {
   return g_atomic_int_get (&live_workers);
+}
+
+static void
+live_add (GbkScanner *s)
+{
+  g_mutex_lock (&live_lock);
+  if (live_scanners == nullptr)
+    live_scanners = g_ptr_array_new ();
+  g_ptr_array_add (live_scanners, s);
+  g_mutex_unlock (&live_lock);
+}
+
+static void
+live_remove (GbkScanner *s)
+{
+  g_mutex_lock (&live_lock);
+  if (live_scanners == nullptr || !g_ptr_array_remove_fast (live_scanners, s))
+    gbk_fatal ("scanner missing from the live list");
+  g_mutex_unlock (&live_lock);
+}
+
+bool
+gbk_path_is_under (const char *path, const char *root)
+{
+  size_t n = strlen (root);
+  if (n > 0 && root[n - 1] == '/')
+    n--;                                   /* "/" itself, or a trailing slash */
+  return strncmp (path, root, n) == 0 && (path[n] == '\0' || path[n] == '/');
+}
+
+bool
+gbk_scanner_busy_under (const char *root)
+{
+  bool busy = false;
+  g_mutex_lock (&live_lock);
+  for (guint i = 0; live_scanners != nullptr && i < live_scanners->len && !busy; i++)
+    busy = gbk_path_is_under (((GbkScanner *) live_scanners->pdata[i])->path, root);
+  g_mutex_unlock (&live_lock);
+  return busy;
 }
 
 void
@@ -404,10 +454,14 @@ worker (void *data)
     {
       if (full_scan (s, dirfd, live) && live)
         watch_loop (s, sub, self_wd, parent_wd, dirfd);
+      int delay = g_atomic_int_get (&release_delay_ms);
+      if (delay > 0)
+        g_usleep ((gulong) delay * 1000);   /* a slow device: still holding the folder */
       close (dirfd);
     }
 
   gbk_inotify_sub_free (sub);
+  live_remove (s);                 /* holds nothing open now */
   scanner_unref (s);
   g_atomic_int_dec_and_test (&live_workers);
   return nullptr;
@@ -428,10 +482,12 @@ gbk_scanner_start (const char *path, GbkTypeTable *types)
 
   g_atomic_ref_count_inc (&s->rc);            /* the worker's reference */
   g_atomic_int_inc (&live_workers);
+  live_add (s);
   g_autoptr (GError) error = nullptr;
   GThread *t = g_thread_try_new ("gbk-scan", worker, s, &error);
   if (t == nullptr)
     {
+      live_remove (s);
       g_atomic_int_dec_and_test (&live_workers);
       scanner_unref (s);                      /* the worker's reference, never used */
       push_error (s, GBK_SCAN_ERROR, EAGAIN);
