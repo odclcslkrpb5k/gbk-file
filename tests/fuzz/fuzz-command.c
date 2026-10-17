@@ -13,9 +13,11 @@ LLVMFuzzerTestOneInput (const uint8_t *data, size_t size)
 
   const char *const files[] = { "/a/\"quoted\" 'x' $(y) %f %%", "/b/-rf" };
   const char *const runv[] = { "/bin/sh", "/c/script.sh" };
-  GbkCommandArgs a = { .dir = "/d/%d dir", .files = files,
+  GbkCommandArgs a = { .dir = "/d/%d dir",
+                       .files = files,
                        .n_files = gbk_command_uses (c, 'f') ? 1 : 2,
-                       .run = runv, .n_run = 2 };
+                       .run = runv,
+                       .n_run = 2 };
   g_auto (GStrv) argv = gbk_command_expand (c, &a);
   g_assert (argv[0] != nullptr && argv[0][0] != '\0');
   /* %F: each file must appear as its own, unmodified argument. */

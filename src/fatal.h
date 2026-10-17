@@ -4,8 +4,7 @@
  * (analyzer-infinite-loop), and suppressing the analyzer would hide real findings. */
 #pragma once
 
-[[noreturn]] G_GNUC_PRINTF (1, 2) static inline void
-gbk_fatal (const char *format, ...)
+[[noreturn]] G_GNUC_PRINTF (1, 2) static inline void gbk_fatal (const char *format, ...)
 {
   va_list args;
   va_start (args, format);

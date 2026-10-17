@@ -58,8 +58,8 @@ wait_at (GbkWindow *w, const char *path)
 {
   PathCtx c = { w, path };
   if (!wait_until (at_path_and_ready, &c))
-    gbk_fatal ("expected to reach %s, at %s (state %d, error %d, live %d)", path, gbk_window_path (w),
-               model_of (w) ? (int) gbk_dir_model_state (model_of (w)) : -1,
+    gbk_fatal ("expected to reach %s, at %s (state %d, error %d, live %d)", path,
+               gbk_window_path (w), model_of (w) ? (int) gbk_dir_model_state (model_of (w)) : -1,
                model_of (w) ? gbk_dir_model_error (model_of (w)) : -1,
                model_of (w) ? (int) gbk_dir_model_live (model_of (w)) : -1);
 }
@@ -118,8 +118,8 @@ mouse_button (GdkWindow *win, guint button)
       ev->button.button = button;
       ev->button.x = ev->button.y = 3;
       ev->button.time = GDK_CURRENT_TIME;
-      gdk_event_set_device (ev, gdk_seat_get_pointer (
-          gdk_display_get_default_seat (gdk_window_get_display (win))));
+      gdk_event_set_device (
+          ev, gdk_seat_get_pointer (gdk_display_get_default_seat (gdk_window_get_display (win))));
       gtk_main_do_event (ev);
       gdk_event_free (ev);
     }
@@ -129,8 +129,8 @@ static void
 test_navigation (void)
 {
   g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
-  mkdirs (root, (const char *const[]) { "a/", "b/", "sub/", "sub/x", "sub/y", ".hid", "f.txt",
-                                        nullptr });
+  mkdirs (root,
+          (const char *const[]) { "a/", "b/", "sub/", "sub/x", "sub/y", ".hid", "f.txt", nullptr });
   g_autofree char *sub = g_build_filename (root, "sub", nullptr);
 
   GbkWindow *w = gbk_window_new (app, ctx, root);
@@ -279,8 +279,8 @@ open_context_menu (GbkWindow *w)
   ev->key.window = g_object_ref (gtk_widget_get_window (GTK_WIDGET (w)));
   ev->key.keyval = GDK_KEY_Menu;
   ev->key.time = GDK_CURRENT_TIME;
-  gdk_event_set_device (ev, gdk_seat_get_keyboard (
-      gdk_display_get_default_seat (gtk_widget_get_display (GTK_WIDGET (w)))));
+  gdk_event_set_device (ev, gdk_seat_get_keyboard (gdk_display_get_default_seat (
+                                gtk_widget_get_display (GTK_WIDGET (w)))));
   gtk_main_do_event (ev);
   gdk_event_free (ev);
   GList *menus = gtk_menu_get_for_attach_widget (GTK_WIDGET (v));
@@ -299,7 +299,8 @@ menu_labels (GtkMenu *menu)
       if (s->len > 0)
         g_string_append_c (s, '|');
       const char *label = GTK_IS_SEPARATOR_MENU_ITEM (l->data)
-                            ? "-" : gtk_menu_item_get_label (GTK_MENU_ITEM (l->data));
+                              ? "-"
+                              : gtk_menu_item_get_label (GTK_MENU_ITEM (l->data));
       g_string_append (s, label);
     }
   return g_string_free (s, false);
@@ -333,8 +334,8 @@ right_click_bar (GbkWindow *w, const char *path)
   ev->button.button = GDK_BUTTON_SECONDARY;
   ev->button.x = ev->button.y = 2;
   ev->button.time = GDK_CURRENT_TIME;
-  gdk_event_set_device (ev, gdk_seat_get_pointer (
-      gdk_display_get_default_seat (gtk_widget_get_display (button))));
+  gdk_event_set_device (
+      ev, gdk_seat_get_pointer (gdk_display_get_default_seat (gtk_widget_get_display (button))));
   gtk_main_do_event (ev);
   gdk_event_free (ev);
   GList *menus = gtk_menu_get_for_attach_widget (GTK_WIDGET (gbk_window_pathbar (w)));
@@ -379,8 +380,8 @@ static char *
 clipboard_text (GbkWindow *w)
 {
   char *text = nullptr;
-  gbk_clipboard_request (G_OBJECT (w), gtk_widget_get_clipboard (GTK_WIDGET (w),
-                                                                 GDK_SELECTION_CLIPBOARD),
+  gbk_clipboard_request (G_OBJECT (w),
+                         gtk_widget_get_clipboard (GTK_WIDGET (w), GDK_SELECTION_CLIPBOARD),
                          gdk_atom_intern_static_string ("UTF8_STRING"), got_text, &text, nullptr);
   g_assert_true (wait_until (string_set, &text));
   return text;
@@ -415,15 +416,16 @@ test_context_menu (void)
   /* Background menu: the directory itself, plus view options. */
   GtkMenu *menu = open_context_menu (w);
   g_autofree char *labels = menu_labels (menu);
-  g_assert_cmpstr (labels, ==,
-                   "Create Folder…|Create File…|-|Paste|Copy Full Path|-|Open Terminal Here|-|"
-                   "Sort by Name|Sort by Date Modified|Sort by Size|-|Show Hidden Files|-|Properties…");
+  g_assert_cmpstr (
+      labels, ==,
+      "Create Folder…|Create File…|-|Paste|Copy Full Path|-|Open Terminal Here|-|"
+      "Sort by Name|Sort by Date Modified|Sort by Size|-|Show Hidden Files|-|Properties…");
   const char *first = gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0)));
   g_assert_cmpstr (first, ==, "a-old");
   choose (menu, "Sort by Date Modified");
   g_assert_cmpint (gbk_dir_model_sort (m), ==, GBK_SORT_MTIME);
-  g_assert_cmpstr (gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 2))),
-                   ==, "a-old");                     /* oldest last */
+  g_assert_cmpstr (gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 2))), ==,
+                   "a-old");                     /* oldest last */
   g_assert_true (wait_until (menus_gone, w));       /* destroyed after closing */
 
   /* Copy Full Path on empty space: the folder's own path. */
@@ -455,8 +457,8 @@ test_context_menu (void)
   choose (open_context_menu (w), "Copy Full Path");
   g_autofree char *all = clipboard_text (w);
   /* Visible order: newest first since the earlier menu choice ("ran" is Execute's marker). */
-  g_autofree char *expect = g_strdup_printf ("%s\n%s/b-new\n%s\n%s/a-old", marker, root, prog,
-                                             root);
+  g_autofree char *expect
+      = g_strdup_printf ("%s\n%s/b-new\n%s\n%s/a-old", marker, root, prog, root);
   g_assert_cmpstr (all, ==, expect);
   g_assert_cmpstr (gbk_window_status (w), ==, "4 paths copied");
   g_assert_true (wait_until (menus_gone, w));
@@ -508,8 +510,8 @@ test_open_folder_elsewhere (void)
   g_assert_true (wait_until (menus_gone, w));
 
   /* Two folders in new windows: one window each. */
-  GbkHandle both[] = { gbk_dir_model_find (model_of (w), "x"),
-                       gbk_dir_model_find (model_of (w), "y") };
+  GbkHandle both[]
+      = { gbk_dir_model_find (model_of (w), "x"), gbk_dir_model_find (model_of (w), "y") };
   gbk_view_set_selection (gbk_window_view (w), both, 2);
   guint windows = g_list_length (gtk_application_get_windows (app));
   choose (open_context_menu (w), "Open in New Window");
@@ -594,7 +596,8 @@ test_scroll_extent (void)
   g_assert_cmpuint (gbk_view_rows_per_column (v), >, 0);
   size_t rows = gbk_view_rows_per_column (v);
   size_t want = gbk_dir_model_visible_index (model_of (w), left) / rows * rows;
-  g_assert_cmpuint (gbk_view_item_at (v, 1, 1), ==, gbk_dir_model_visible_handle (model_of (w), want));
+  g_assert_cmpuint (gbk_view_item_at (v, 1, 1), ==,
+                    gbk_dir_model_visible_handle (model_of (w), want));
 
   gtk_widget_destroy (GTK_WIDGET (w));
   rm_rf (root);
@@ -609,8 +612,8 @@ right_click_status_bar (GbkWindow *w)
   ev->button.button = GDK_BUTTON_SECONDARY;
   ev->button.x = ev->button.y = 3;
   ev->button.time = GDK_CURRENT_TIME;
-  gdk_event_set_device (ev, gdk_seat_get_pointer (
-      gdk_display_get_default_seat (gtk_widget_get_display (bar))));
+  gdk_event_set_device (
+      ev, gdk_seat_get_pointer (gdk_display_get_default_seat (gtk_widget_get_display (bar))));
   gtk_main_do_event (ev);
   gdk_event_free (ev);
   GList *menus = gtk_menu_get_for_attach_widget (bar);
@@ -633,9 +636,10 @@ test_status_bar_menu (void)
   gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (model_of (w), "f.txt"));
   GtkMenu *menu = right_click_status_bar (w);
   g_autofree char *labels = menu_labels (menu);
-  g_assert_cmpstr (labels, ==,
-                   "Create Folder…|Create File…|-|Paste|Copy Full Path|-|Open Terminal Here|-|"
-                   "Sort by Name|Sort by Date Modified|Sort by Size|-|Show Hidden Files|-|Properties…");
+  g_assert_cmpstr (
+      labels, ==,
+      "Create Folder…|Create File…|-|Paste|Copy Full Path|-|Open Terminal Here|-|"
+      "Sort by Name|Sort by Date Modified|Sort by Size|-|Show Hidden Files|-|Properties…");
   choose (menu, "Sort by Size");
   g_assert_cmpint (gbk_dir_model_sort (model_of (w)), ==, GBK_SORT_SIZE);
   GtkWidget *bar = gbk_window_status_bar (w);
@@ -789,7 +793,8 @@ test_create_executable_properties (void)
   GbkDirModel *m = model_of (w);
   gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (m, "notes.txt"));
   GtkMenu *menu = open_context_menu (w);
-  g_assert_false (gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM (menu_item_named (menu, "Executable"))));
+  g_assert_false (
+      gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM (menu_item_named (menu, "Executable"))));
   choose (menu, "Executable");
   g_assert_true (wait_until (is_executable, notes));
   g_assert_true (wait_until (menus_gone, w));
@@ -805,7 +810,8 @@ test_create_executable_properties (void)
     }
   gbk_view_select_only (gbk_window_view (w), gbk_dir_model_find (m, "notes.txt"));
   menu = open_context_menu (w);
-  g_assert_true (gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM (menu_item_named (menu, "Executable"))));
+  g_assert_true (
+      gtk_check_menu_item_get_active (GTK_CHECK_MENU_ITEM (menu_item_named (menu, "Executable"))));
   choose (menu, "Executable");
   g_assert_true (wait_until (not_executable, notes));
   g_assert_true (wait_until (menus_gone, w));
@@ -858,8 +864,8 @@ test_create_executable_properties (void)
   GdkEvent *ev = gdk_event_new (GDK_KEY_PRESS);
   ev->key.window = g_object_ref (gtk_widget_get_window (GTK_WIDGET (p)));
   ev->key.keyval = GDK_KEY_Escape;
-  gdk_event_set_device (ev, gdk_seat_get_keyboard (
-      gdk_display_get_default_seat (gtk_widget_get_display (GTK_WIDGET (p)))));
+  gdk_event_set_device (ev, gdk_seat_get_keyboard (gdk_display_get_default_seat (
+                                gtk_widget_get_display (GTK_WIDGET (p)))));
   gtk_main_do_event (ev);
   gdk_event_free (ev);
   g_assert_null (alive);
@@ -897,8 +903,8 @@ fake_trigger (GtkWidget *widget, double x, double y)
   ev->button.x = x;
   ev->button.y = y;
   ev->button.time = GDK_CURRENT_TIME;
-  gdk_event_set_device (ev, gdk_seat_get_pointer (
-      gdk_display_get_default_seat (gtk_widget_get_display (widget))));
+  gdk_event_set_device (
+      ev, gdk_seat_get_pointer (gdk_display_get_default_seat (gtk_widget_get_display (widget))));
   return ev;
 }
 
@@ -1100,8 +1106,8 @@ test_real_drag_and_drop (void)
   double ax, ay, sx, sy;
   g_assert_true (item_xy (w, "a.txt", &ax, &ay));
   g_assert_true (item_xy (w, "sub", &sx, &sy));
-  GbkHandle both[] = { gbk_dir_model_find (model_of (w), "a.txt"),
-                       gbk_dir_model_find (model_of (w), "b.txt") };
+  GbkHandle both[]
+      = { gbk_dir_model_find (model_of (w), "a.txt"), gbk_dir_model_find (model_of (w), "b.txt") };
   gbk_view_set_selection (gbk_window_view (w), both, 2);
 
   x_move (vw, ax, ay);
@@ -1202,8 +1208,8 @@ static void
 test_file_operations (void)
 {
   g_autofree char *root = g_dir_make_tmp ("gbk-win-XXXXXX", nullptr);
-  mkdirs (root, (const char *const[]) { "src/", "dst/", "src/a.txt", "src/b.txt",
-                                        "dst/b.txt", nullptr });
+  mkdirs (root,
+          (const char *const[]) { "src/", "dst/", "src/a.txt", "src/b.txt", "dst/b.txt", nullptr });
   g_autofree char *src = g_build_filename (root, "src", nullptr);
   g_autofree char *dst = g_build_filename (root, "dst", nullptr);
   GbkWindow *w = gbk_window_new (app, ctx, src);
@@ -1328,8 +1334,8 @@ send_key_to_window (GbkWindow *w, guint keyval, GdkModifierType state)
       ev->key.hardware_keycode = (guint16) keys[pick].keycode;
       ev->key.group = (guint8) keys[pick].group;
     }
-  gdk_event_set_device (ev, gdk_seat_get_keyboard (
-      gdk_display_get_default_seat (gtk_widget_get_display (GTK_WIDGET (w)))));
+  gdk_event_set_device (ev, gdk_seat_get_keyboard (gdk_display_get_default_seat (
+                                gtk_widget_get_display (GTK_WIDGET (w)))));
   gtk_main_do_event (ev);
   gdk_event_free (ev);
   while (gtk_events_pending ())
@@ -1337,8 +1343,12 @@ send_key_to_window (GbkWindow *w, guint keyval, GdkModifierType state)
 }
 
 #define assert_bar(w, expected) \
-  do { g_autofree char *d_ = gbk_pathbar_describe (gbk_window_pathbar (w)); \
-       g_assert_cmpstr (d_, ==, expected); } while (0)
+  do \
+    { \
+      g_autofree char *d_ = gbk_pathbar_describe (gbk_window_pathbar (w)); \
+      g_assert_cmpstr (d_, ==, expected); \
+    } \
+  while (0)
 
 static void
 test_pathbar (void)
@@ -1369,8 +1379,9 @@ test_pathbar (void)
   GtkWidget *bar_widget = GTK_WIDGET (gbk_window_pathbar (w));
   GtkMenu *menu = right_click_bar (w, a);
   g_autofree char *labels = menu_labels (menu);
-  g_assert_cmpstr (labels, ==, "Open|Open in New Tab|Open in New Window|Open Terminal Here|-|"
-                               "Copy|Paste Into Folder|Copy Full Path|-|Properties…");
+  g_assert_cmpstr (labels, ==,
+                   "Open|Open in New Tab|Open in New Window|Open Terminal Here|-|"
+                   "Copy|Paste Into Folder|Copy Full Path|-|Properties…");
   choose (menu, "Copy Full Path");
   g_autofree char *copied = clipboard_text (w);
   g_assert_cmpstr (copied, ==, a);
@@ -1495,10 +1506,12 @@ test_tabs (void)
   GtkWidget *notebook = gtk_widget_get_ancestor (bar_widget, GTK_TYPE_NOTEBOOK);
   g_assert_nonnull (notebook);
   int bar_y, page_y;
-  g_assert_true (gtk_widget_translate_coordinates (bar_widget, GTK_WIDGET (w), 0, 0, nullptr, &bar_y));
+  g_assert_true (
+      gtk_widget_translate_coordinates (bar_widget, GTK_WIDGET (w), 0, 0, nullptr, &bar_y));
   GtkWidget *page = gtk_notebook_get_nth_page (GTK_NOTEBOOK (notebook), 0);
   GtkWidget *tab_label = gtk_notebook_get_tab_label (GTK_NOTEBOOK (notebook), page);
-  g_assert_true (gtk_widget_translate_coordinates (tab_label, GTK_WIDGET (w), 0, 0, nullptr, &page_y));
+  g_assert_true (
+      gtk_widget_translate_coordinates (tab_label, GTK_WIDGET (w), 0, 0, nullptr, &page_y));
   g_assert_cmpint (page_y, <, bar_y);
 
   /* Show hidden is window-wide: every tab. */
@@ -1511,8 +1524,8 @@ test_tabs (void)
 
   /* Activating several folders opens each in a new tab. */
   GbkView *v = gbk_window_view (w);
-  GbkHandle hs[2] = { gbk_dir_model_find (model_of (w), "two"),
-                      gbk_dir_model_find (model_of (w), "three") };
+  GbkHandle hs[2]
+      = { gbk_dir_model_find (model_of (w), "two"), gbk_dir_model_find (model_of (w), "three") };
   gbk_view_set_selection (v, hs, 2);
   g_signal_emit_by_name (v, "activate");
   g_assert_cmpint (gbk_window_n_tabs (w), ==, 4);

@@ -9,7 +9,11 @@
  * "not moved" (del = false) whatever the choice, since we do the work ourselves. */
 #pragma once
 
-enum { GBK_DND_URIS, GBK_DND_TEXT };
+enum
+{
+  GBK_DND_URIS,
+  GBK_DND_TEXT
+};
 
 /* What we offer when dragging out. */
 [[nodiscard]] GtkTargetList *gbk_dnd_source_targets (void);

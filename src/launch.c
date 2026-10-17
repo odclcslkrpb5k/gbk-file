@@ -7,9 +7,8 @@ gbk_launch_argv (char **argv, const char *cwd, GError **error)
   /* Without G_SPAWN_DO_NOT_REAP_CHILD GLib reaps the child itself; without
    * G_SPAWN_LEAVE_DESCRIPTORS_OPEN our fds (inotify, eventfds...) are not inherited. */
   GPid pid;
-  return g_spawn_async (cwd, argv, nullptr,
-                        G_SPAWN_SEARCH_PATH | G_SPAWN_STDIN_FROM_DEV_NULL, nullptr, nullptr,
-                        &pid, error);
+  return g_spawn_async (cwd, argv, nullptr, G_SPAWN_SEARCH_PATH | G_SPAWN_STDIN_FROM_DEV_NULL,
+                        nullptr, nullptr, &pid, error);
 }
 
 bool

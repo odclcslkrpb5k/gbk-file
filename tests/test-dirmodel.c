@@ -8,8 +8,8 @@ static GbkEntry *
 mk (const char *name, GbkFileKind kind, int64_t mtime)
 {
   /* Size follows mtime, so the size sort has something to order by too. */
-  GbkEntryInfo info = { .kind = kind, .mtime_ns = mtime, .size = (uint64_t) MAX (mtime, 0),
-                        .mode = 0644 };
+  GbkEntryInfo info
+      = { .kind = kind, .mtime_ns = mtime, .size = (uint64_t) MAX (mtime, 0), .mode = 0644 };
   GbkEntry *e = gbk_entry_new (name, strlen (name), &info, types);
   g_assert_nonnull (e);
   return e;
@@ -69,7 +69,12 @@ visible_names (GbkDirModel *m)
 }
 
 #define assert_visible(m, expected) \
-  do { g_autofree char *got_ = visible_names (m); g_assert_cmpstr (got_, ==, expected); } while (0)
+  do \
+    { \
+      g_autofree char *got_ = visible_names (m); \
+      g_assert_cmpstr (got_, ==, expected); \
+    } \
+  while (0)
 
 static void
 test_order_name (void)
@@ -256,10 +261,10 @@ test_random_oracle (void)
           if (g_rand_boolean (r))
             g_ptr_array_add (d->removes, g_steal_pointer (&name));
           else
-            g_ptr_array_add (d->upserts,
-                             mk (name, g_rand_int_range (r, 0, 5) == 0 ? GBK_KIND_DIRECTORY
-                                                                       : GBK_KIND_REGULAR,
-                                 g_rand_int_range (r, 0, 50)));
+            g_ptr_array_add (
+                d->upserts,
+                mk (name, g_rand_int_range (r, 0, 5) == 0 ? GBK_KIND_DIRECTORY : GBK_KIND_REGULAR,
+                    g_rand_int_range (r, 0, 50)));
         }
       gbk_dir_model_apply_for_test (m, d);
       if (round % 500 == 0)

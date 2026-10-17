@@ -7,8 +7,8 @@ run (const char *tmpl, const char *allowed, const char *const *files, size_t n)
   g_autoptr (GbkCommand) c = gbk_command_parse (tmpl, allowed, &error);
   g_assert_no_error (error);
   const char *const runv[] = { "/usr/bin/python3", "/home/u/my script.py" };
-  GbkCommandArgs a = { .dir = "/home/u/dir with space", .files = files, .n_files = n,
-                       .run = runv, .n_run = 2 };
+  GbkCommandArgs a
+      = { .dir = "/home/u/dir with space", .files = files, .n_files = n, .run = runv, .n_run = 2 };
   g_auto (GStrv) argv = gbk_command_expand (c, &a);
   return g_strjoinv ("|", argv);
 }

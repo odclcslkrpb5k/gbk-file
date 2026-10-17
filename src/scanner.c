@@ -1,8 +1,9 @@
 #include "scanner.h"
 #include "inotify-hub.h"
 
-#define WATCH_MASK (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB \
-                    | IN_CLOSE_WRITE | IN_MODIFY | IN_DELETE_SELF | IN_MOVE_SELF | IN_ONLYDIR)
+#define WATCH_MASK \
+  (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB | IN_CLOSE_WRITE | IN_MODIFY \
+   | IN_DELETE_SELF | IN_MOVE_SELF | IN_ONLYDIR)
 #define SELF_GONE_MASK (IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT | IN_IGNORED)
 
 struct GbkScanner
@@ -221,7 +222,7 @@ full_scan (GbkScanner *s, int dirfd, bool live)
 
       GbkEntry *e = gbk_entry_new_at (dirfd, d->d_name, d->d_type, s->types);
       if (e == nullptr)
-        continue;                     /* vanished since readdir */
+        continue; /* vanished since readdir */
       g_ptr_array_add (chunk->upserts, e);
 
       if (chunk->upserts->len >= limit)
@@ -249,13 +250,13 @@ full_scan (GbkScanner *s, int dirfd, bool live)
 
 typedef struct
 {
-  GHashTable *names;    /* owned raw names whose state must be re-read */
-  int self_wd;          /* watch on the directory itself */
-  int parent_wd;        /* watch on its parent (-1 if none), for our own deletion/move */
+  GHashTable *names; /* owned raw names whose state must be re-read */
+  int self_wd; /* watch on the directory itself */
+  int parent_wd; /* watch on its parent (-1 if none), for our own deletion/move */
   const char *basename; /* our name in the parent */
   bool overflow;
   bool gone;
-  bool maybe_gone;      /* something happened to us that may mean deleted or moved */
+  bool maybe_gone; /* something happened to us that may mean deleted or moved */
 } Pending;
 
 static void
@@ -265,7 +266,7 @@ on_inotify_event (int wd, uint32_t mask, const char *name, size_t name_len, void
   if (mask & IN_Q_OVERFLOW)
     {
       p->overflow = true;
-      p->maybe_gone = true;      /* lost events may include our own deletion */
+      p->maybe_gone = true; /* lost events may include our own deletion */
       return;
     }
   if (wd == p->parent_wd)
@@ -277,7 +278,7 @@ on_inotify_event (int wd, uint32_t mask, const char *name, size_t name_len, void
       return;
     }
   if (wd != p->self_wd)
-    return;                      /* a removed watch's stragglers */
+    return; /* a removed watch's stragglers */
   if (mask & SELF_GONE_MASK)
     p->gone = true;
   if (name == nullptr && (mask & IN_ATTRIB))
@@ -285,7 +286,7 @@ on_inotify_event (int wd, uint32_t mask, const char *name, size_t name_len, void
   if (name != nullptr && !p->overflow)
     {
       if (g_hash_table_size (p->names) >= (guint) g_atomic_int_get (&pending_max))
-        p->overflow = true;            /* a storm: one rescan is cheaper than N statx */
+        p->overflow = true; /* a storm: one rescan is cheaper than N statx */
       else
         g_hash_table_add (p->names, g_strndup (name, name_len));
     }
@@ -351,7 +352,7 @@ still_here (const char *path, int dirfd)
   if (fstat (dirfd, &held) != 0 || held.st_nlink == 0)
     return false;
   if (stat (path, &at_path) != 0)
-    return errno != ENOENT && errno != ENOTDIR;   /* other errors: assume still there */
+    return errno != ENOENT && errno != ENOTDIR; /* other errors: assume still there */
   return held.st_dev == at_path.st_dev && held.st_ino == at_path.st_ino;
 }
 
@@ -382,7 +383,7 @@ watch_loop (GbkScanner *s, GbkInotifySub *sub, int self_wd, int parent_wd, int d
           struct pollfd pf = { .fd = gbk_inotify_sub_fd (sub), .events = POLLIN };
           int r = poll (&pf, 1, (int) MIN (left, GBK_SCAN_QUIET_MS));
           if (r <= 0)
-            break;                     /* quiet (or error): flush now */
+            break; /* quiet (or error): flush now */
           drain_inotify (sub, &p);
         }
       if (is_cancelled (s))
@@ -444,7 +445,7 @@ worker (void *data)
       g_autofree char *parent = g_path_get_dirname (s->path);
       parent_wd = gbk_inotify_sub_watch (sub, parent, IN_DELETE | IN_MOVED_FROM | IN_ONLYDIR);
       if (parent_wd == self_wd)
-        parent_wd = -1;          /* same inode (bind mounts): don't confuse the two */
+        parent_wd = -1; /* same inode (bind mounts): don't confuse the two */
     }
 
   int dirfd = open (s->path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
@@ -456,12 +457,12 @@ worker (void *data)
         watch_loop (s, sub, self_wd, parent_wd, dirfd);
       int delay = g_atomic_int_get (&release_delay_ms);
       if (delay > 0)
-        g_usleep ((gulong) delay * 1000);   /* a slow device: still holding the folder */
+        g_usleep ((gulong) delay * 1000); /* a slow device: still holding the folder */
       close (dirfd);
     }
 
   gbk_inotify_sub_free (sub);
-  live_remove (s);                 /* holds nothing open now */
+  live_remove (s); /* holds nothing open now */
   scanner_unref (s);
   g_atomic_int_dec_and_test (&live_workers);
   return nullptr;
@@ -478,9 +479,9 @@ gbk_scanner_start (const char *path, GbkTypeTable *types)
   s->wake_fd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
   s->cancel_fd = eventfd (0, EFD_CLOEXEC | EFD_NONBLOCK);
   if (s->wake_fd < 0 || s->cancel_fd < 0)
-    gbk_fatal ("eventfd: %s", g_strerror (errno));   /* fd exhaustion: nothing sane to do */
+    gbk_fatal ("eventfd: %s", g_strerror (errno)); /* fd exhaustion: nothing sane to do */
 
-  g_atomic_ref_count_inc (&s->rc);            /* the worker's reference */
+  g_atomic_ref_count_inc (&s->rc); /* the worker's reference */
   g_atomic_int_inc (&live_workers);
   live_add (s);
   g_autoptr (GError) error = nullptr;
@@ -496,7 +497,7 @@ gbk_scanner_start (const char *path, GbkTypeTable *types)
       push_error (s, GBK_SCAN_ERROR, EAGAIN);
     }
   else
-    g_thread_unref (t);                       /* detached */
+    g_thread_unref (t); /* detached */
   return s;
 }
 

@@ -112,14 +112,15 @@ show_details (GbkProps *p, const GbkFileInfo *info)
   if (info->symlink)
     {
       g_autofree char *target = info->link_target != nullptr
-                                  ? g_filename_display_name (info->link_target) : g_strdup ("?");
+                                    ? g_filename_display_name (info->link_target)
+                                    : g_strdup ("?");
       add_field (p, row++, "Link target", target);
     }
   if (!is_dir)
     {
       g_autofree char *human = g_format_size_full (info->size, G_FORMAT_SIZE_IEC_UNITS);
-      g_autofree char *size = g_strdup_printf ("%s (%" G_GUINT64_FORMAT " bytes)", human,
-                                               info->size);
+      g_autofree char *size
+          = g_strdup_printf ("%s (%" G_GUINT64_FORMAT " bytes)", human, info->size);
       add_field (p, row++, "Size", size);
     }
   g_autofree char *mtime = format_time (info->mtime_ns);

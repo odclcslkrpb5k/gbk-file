@@ -239,8 +239,9 @@ copy_data (Ctx *c, int in, int out, const char *shown)
       if (use_cfr)
         {
           n = copy_file_range (in, nullptr, out, nullptr, COPY_CHUNK, 0);
-          if (n < 0 && (errno == EXDEV || errno == EINVAL || errno == ENOSYS
-                        || errno == EOPNOTSUPP || errno == EBADF))
+          if (n < 0
+              && (errno == EXDEV || errno == EINVAL || errno == ENOSYS || errno == EOPNOTSUPP
+                  || errno == EBADF))
             {
               use_cfr = false;     /* not supported here: plain read/write */
               continue;
@@ -372,8 +373,7 @@ copy_special (Ctx *c, const char *src, const char *dst, const struct stat *st, b
   if (replace)
     {
       g_autofree char *dir = g_path_get_dirname (dst);
-      g_autofree char *base = g_strdup_printf (TMP_PREFIX "%" G_GINT64_FORMAT,
-                                               g_get_real_time ());
+      g_autofree char *base = g_strdup_printf (TMP_PREFIX "%" G_GINT64_FORMAT, g_get_real_time ());
       tmp = g_build_filename (dir, base, nullptr);
     }
   const char *make = tmp != nullptr ? tmp : dst;
@@ -389,8 +389,8 @@ copy_special (Ctx *c, const char *src, const char *dst, const struct stat *st, b
   return true;
 }
 
-static bool copy_into (Ctx *c, const char *src, const char *dst_dir, const char *name,
-                       int depth, GPtrArray *created);
+static bool copy_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int depth,
+                       GPtrArray *created);
 
 static bool
 copy_dir (Ctx *c, const char *src, const char *dst, const struct stat *st, bool merge, int depth)
@@ -433,15 +433,12 @@ copy_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int d
   if (lstat (dst, &dst_st) == 0)
     {
       GbkChoice ch = same_inode (&st, &dst_st)
-                       ? GBK_CHOICE_KEEP_BOTH       /* pasted where it came from: a copy */
-                       : ask_conflict (c, src, dst, S_ISDIR (dst_st.st_mode));
+                         ? GBK_CHOICE_KEEP_BOTH       /* pasted where it came from: a copy */
+                         : ask_conflict (c, src, dst, S_ISDIR (dst_st.st_mode));
       switch (ch)
         {
-        case GBK_CHOICE_CANCEL:
-          return false;
-        case GBK_CHOICE_SKIP:
-          c->incomplete = true;
-          return true;
+        case GBK_CHOICE_CANCEL: return false;
+        case GBK_CHOICE_SKIP: c->incomplete = true; return true;
         case GBK_CHOICE_KEEP_BOTH:
           g_free (final_name);
           final_name = gbk_ops_free_name (dst_dir, name);
@@ -455,8 +452,7 @@ copy_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int d
                                                   : "A folder is in the way of this file");
           replace = true;
           break;
-        default:
-          gbk_fatal ("bad choice %d", (int) ch);
+        default: gbk_fatal ("bad choice %d", (int) ch);
         }
     }
 
@@ -547,8 +543,8 @@ delete_path (Ctx *c, const char *path)
 
 /* ---- moving ---- */
 
-static bool move_into (Ctx *c, const char *src, const char *dst_dir, const char *name,
-                       int depth, GPtrArray *created);
+static bool move_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int depth,
+                       GPtrArray *created);
 
 /* Different filesystem: copy, and delete the source only if the copy was complete. */
 static bool
@@ -585,11 +581,8 @@ move_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int d
       GbkChoice ch = ask_conflict (c, src, dst, S_ISDIR (dst_st.st_mode));
       switch (ch)
         {
-        case GBK_CHOICE_CANCEL:
-          return false;
-        case GBK_CHOICE_SKIP:
-          c->incomplete = true;
-          return true;
+        case GBK_CHOICE_CANCEL: return false;
+        case GBK_CHOICE_SKIP: c->incomplete = true; return true;
         case GBK_CHOICE_KEEP_BOTH:
           g_free (final_name);
           final_name = gbk_ops_free_name (dst_dir, name);
@@ -619,7 +612,7 @@ move_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int d
               closedir (d);
               if (!ok)
                 return false;
-              rmdir (src);                    /* fails harmlessly if something was skipped */
+              rmdir (src); /* fails harmlessly if something was skipped */
               if (created != nullptr)
                 g_ptr_array_add (created, g_strdup (final_name));
               return true;
@@ -639,8 +632,7 @@ move_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int d
           if (created != nullptr)
             g_ptr_array_add (created, g_strdup (final_name));
           return delete_path (c, src);
-        default:
-          gbk_fatal ("bad choice %d", (int) ch);
+        default: gbk_fatal ("bad choice %d", (int) ch);
         }
     }
 
@@ -692,8 +684,8 @@ trash_path (Ctx *c, const char *path)
 /* ---- entry points ---- */
 
 bool
-gbk_ops_run (GbkOpKind kind, GPtrArray *sources, const char *dest_dir,
-             const GbkOpsHooks *hooks, GPtrArray *created, GError **error)
+gbk_ops_run (GbkOpKind kind, GPtrArray *sources, const char *dest_dir, const GbkOpsHooks *hooks,
+             GPtrArray *created, GError **error)
 {
   g_autoptr (GHashTable) links = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
   Ctx c = { .h = hooks, .links = links };
@@ -704,8 +696,7 @@ gbk_ops_run (GbkOpKind kind, GPtrArray *sources, const char *dest_dir,
       struct stat st;
       if (stat (dest_dir, &st) != 0 || !S_ISDIR (st.st_mode))
         {
-          g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_DIRECTORY,
-                       "Destination is not a folder");
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_DIRECTORY, "Destination is not a folder");
           return false;
         }
       for (guint i = 0; i < sources->len; i++)
@@ -772,8 +763,8 @@ gbk_ops_rename (const char *path, const char *new_name, GError **error)
       if (err == EEXIST)
         g_set_error (error, G_IO_ERROR, G_IO_ERROR_EXISTS, "\"%s\" already exists", shown);
       else
-        g_set_error (error, G_IO_ERROR, (int) g_io_error_from_errno (err), "Can't rename to \"%s\": %s",
-                     shown, g_strerror (err));
+        g_set_error (error, G_IO_ERROR, (int) g_io_error_from_errno (err),
+                     "Can't rename to \"%s\": %s", shown, g_strerror (err));
       return false;
     }
   return true;
@@ -817,8 +808,8 @@ gbk_ops_create (const char *dir, const char *name, bool folder, GError **error)
       if (err == EEXIST)
         g_set_error (error, G_IO_ERROR, G_IO_ERROR_EXISTS, "\"%s\" already exists", shown);
       else
-        g_set_error (error, G_IO_ERROR, (int) g_io_error_from_errno (err), "Can't create \"%s\": %s",
-                     shown, g_strerror (err));
+        g_set_error (error, G_IO_ERROR, (int) g_io_error_from_errno (err),
+                     "Can't create \"%s\": %s", shown, g_strerror (err));
       return false;
     }
   return true;
@@ -890,7 +881,8 @@ user_name (uid_t uid)
   char buf[4096];
   struct passwd pw, *res = nullptr;
   return getpwuid_r (uid, &pw, buf, sizeof buf, &res) == 0 && res != nullptr
-         ? g_strdup (res->pw_name) : nullptr;
+             ? g_strdup (res->pw_name)
+             : nullptr;
 }
 
 static char *
@@ -899,7 +891,8 @@ group_name (gid_t gid)
   char buf[4096];
   struct group gr, *res = nullptr;
   return getgrgid_r (gid, &gr, buf, sizeof buf, &res) == 0 && res != nullptr
-         ? g_strdup (res->gr_name) : nullptr;
+             ? g_strdup (res->gr_name)
+             : nullptr;
 }
 
 GbkFileInfo *

@@ -11,8 +11,8 @@
 #pragma once
 
 /* Return true to keep the source, false to remove it. */
-typedef bool (*GbkSourceFunc)(void *data);
-typedef bool (*GbkFdFunc)(int fd, GIOCondition condition, void *data);
+typedef bool (*GbkSourceFunc) (void *data);
+typedef bool (*GbkFdFunc) (int fd, GIOCondition condition, void *data);
 
 /* Each registration is a macro passing the callback's name as `name`, so the stall watch
  * (below) can say which callback blocked the main loop. Call the macros, not the *_named
@@ -24,8 +24,8 @@ typedef bool (*GbkFdFunc)(int fd, GIOCondition condition, void *data);
   gbk_connect_named (owner, instance, signal, callback, data, false, #callback)
 #define gbk_connect_after(owner, instance, signal, callback, data) \
   gbk_connect_named (owner, instance, signal, callback, data, true, #callback)
-gulong gbk_connect_named (GObject *owner, gpointer instance, const char *signal,
-                          GCallback callback, void *data, bool after, const char *name);
+gulong gbk_connect_named (GObject *owner, gpointer instance, const char *signal, GCallback callback,
+                          void *data, bool after, const char *name);
 
 /* Run `fn(data)` when idle / every `interval_ms`, until it returns false or `owner` is
  * disposed. Returns a source id usable with gbk_source_cancel(). */
@@ -43,8 +43,8 @@ guint gbk_timeout_add_named (GObject *owner, guint interval_ms, GbkSourceFunc fn
  * in finalize is always safe. */
 #define gbk_fd_watch(owner, fd, condition, fn, data) \
   gbk_fd_watch_named (owner, fd, condition, fn, data, #fn)
-guint gbk_fd_watch_named (GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn,
-                          void *data, const char *name);
+guint gbk_fd_watch_named (GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn, void *data,
+                          const char *name);
 
 /* Request clipboard contents for `target`. `fn` runs only if `owner` is still alive when
  * the (asynchronous) answer arrives. `destroy` (may be nullptr) is always called on `data`
@@ -64,7 +64,7 @@ void gbk_clipboard_request_named (GObject *owner, GtkClipboard *clipboard, GdkAt
  * branch per callback. */
 
 /* Cancel a source early and zero `*id`. Safe if the source already finished or `*id` is 0. */
-void gbk_source_cancel(guint *id);
+void gbk_source_cancel (guint *id);
 
 /* Number of live registrations (connections + sources). Tests assert this returns to 0. */
-int gbk_lifetime_live(void);
+int gbk_lifetime_live (void);

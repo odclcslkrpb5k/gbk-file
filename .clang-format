@@ -1,0 +1,19 @@
+# clang-format: ./build check refuses unformatted C (--dry-run --Werror). Tuned to the style the
+# code was written in by hand (GNU-like, 100 columns).
+BasedOnStyle: GNU
+ColumnLimit: 100
+IndentWidth: 2
+ContinuationIndentWidth: 4
+AlwaysBreakAfterDefinitionReturnType: All
+SpaceBeforeParens: Always
+BreakBeforeBraces: GNU
+AlignAfterOpenBracket: Align
+PointerAlignment: Right
+SortIncludes: Never
+AllowShortFunctionsOnASingleLine: None
+AlignConsecutiveMacros: None
+AlignTrailingComments:
+  Kind: Leave
+SpaceAfterCStyleCast: true
+AllowShortCaseLabelsOnASingleLine: true
+AlignEscapedNewlines: DontAlign

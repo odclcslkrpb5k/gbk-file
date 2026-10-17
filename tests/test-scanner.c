@@ -239,8 +239,8 @@ test_large_directory (void)
   g_assert_true (wait_until (is_ready, m, 30000));
   g_assert_cmpuint (gbk_dir_model_n_visible (m), ==, 20000);
   gbk_dir_model_check_order (m);
-  g_assert_cmpstr (gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0))),
-                   ==, "f00000.txt");
+  g_assert_cmpstr (gbk_entry_name (gbk_dir_model_get (m, gbk_dir_model_visible_handle (m, 0))), ==,
+                   "f00000.txt");
   g_clear_object (&m);
   rm_rf (dir);
 }

@@ -4,7 +4,8 @@ static void
 add (GArray *out, GbkMenuKind kind, GbkAction *action)
 {
   if (kind == GBK_MENU_SEPARATOR
-      && (out->len == 0 || g_array_index (out, GbkMenuEntry, out->len - 1).kind == GBK_MENU_SEPARATOR))
+      && (out->len == 0
+          || g_array_index (out, GbkMenuEntry, out->len - 1).kind == GBK_MENU_SEPARATOR))
     return;
   GbkMenuEntry e = { kind, action };
   g_array_append_val (out, e);
@@ -117,8 +118,7 @@ gbk_menu_entries (const GbkConfig *config, GPtrArray *items, GbkMenuTarget targe
           add (out, GBK_MENU_EXECUTABLE, nullptr);
         }
       break;
-    default:
-      gbk_fatal ("bad menu target %d", (int) target);
+    default: gbk_fatal ("bad menu target %d", (int) target);
     }
 
   add (out, GBK_MENU_SEPARATOR, nullptr);

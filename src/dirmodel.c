@@ -362,12 +362,9 @@ apply (GbkDirModel *m, GbkScanMsg *msg)
       m->live = false;
       return free_changed;
 
-    case GBK_SCAN_GONE:
-      m->live = false;
-      return free_changed;
+    case GBK_SCAN_GONE: m->live = false; return free_changed;
 
-    default:
-      gbk_fatal ("bad scan message type %d", (int) msg->type);
+    default: gbk_fatal ("bad scan message type %d", (int) msg->type);
     }
 }
 
@@ -502,12 +499,11 @@ gbk_dir_model_class_init (GbkDirModelClass *klass)
   object_class->dispose = gbk_dir_model_dispose;
   object_class->finalize = gbk_dir_model_finalize;
 
-  signals[SIGNAL_CHANGED] = g_signal_new ("changed", G_TYPE_FROM_CLASS (klass),
-                                          G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                          G_TYPE_NONE, 0);
-  signals[SIGNAL_STATE_CHANGED] = g_signal_new ("state-changed", G_TYPE_FROM_CLASS (klass),
-                                                G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                                G_TYPE_NONE, 0);
+  signals[SIGNAL_CHANGED] = g_signal_new ("changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+                                          0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  signals[SIGNAL_STATE_CHANGED]
+      = g_signal_new ("state-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr,
+                      nullptr, nullptr, G_TYPE_NONE, 0);
 }
 
 static void
@@ -538,8 +534,8 @@ gbk_dir_model_new (const char *path, GbkTypeTable *types)
   g_free (m->path);
   m->path = g_strdup (path);
   m->scanner = gbk_scanner_start (path, types);
-  m->watch_id = gbk_fd_watch (G_OBJECT (m), gbk_scanner_wake_fd (m->scanner), G_IO_IN,
-                              on_scanner_wake, m);
+  m->watch_id
+      = gbk_fd_watch (G_OBJECT (m), gbk_scanner_wake_fd (m->scanner), G_IO_IN, on_scanner_wake, m);
   return m;
 }
 
@@ -565,8 +561,8 @@ gbk_dir_model_check_order (GbkDirModel *m)
   if (expected->len != m->order->len
       || (expected->len > 0
           && memcmp (expected->data, m->order->data, expected->len * sizeof (uint32_t)) != 0))
-    gbk_fatal ("incremental order diverged from full sort (%u vs %u entries)",
-               m->order->len, expected->len);
+    gbk_fatal ("incremental order diverged from full sort (%u vs %u entries)", m->order->len,
+               expected->len);
   for (uint32_t i = 0; i < m->order->len; i++)
     if (slot_at (m, g_array_index (m->order, uint32_t, i))->pos != i)
       gbk_fatal ("position map out of date at %u", i);

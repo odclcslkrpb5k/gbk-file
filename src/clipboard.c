@@ -5,7 +5,12 @@
 #define GNOME_TARGET "x-special/gnome-copied-files"
 #define URI_TARGET "text/uri-list"
 
-enum { INFO_GNOME, INFO_URIS, INFO_TEXT };
+enum
+{
+  INFO_GNOME,
+  INFO_URIS,
+  INFO_TEXT
+};
 
 typedef struct
 {
@@ -24,18 +29,15 @@ payload_get (GtkClipboard *cb G_GNUC_UNUSED, GtkSelectionData *sd, guint info, v
   switch (info)
     {
     case INFO_GNOME:
-      gtk_selection_data_set (sd, gtk_selection_data_get_target (sd), 8,
-                              (const guchar *) p->gnome, (int) strlen (p->gnome));
+      gtk_selection_data_set (sd, gtk_selection_data_get_target (sd), 8, (const guchar *) p->gnome,
+                              (int) strlen (p->gnome));
       break;
     case INFO_URIS:
-      gtk_selection_data_set (sd, gtk_selection_data_get_target (sd), 8,
-                              (const guchar *) p->uris, (int) strlen (p->uris));
+      gtk_selection_data_set (sd, gtk_selection_data_get_target (sd), 8, (const guchar *) p->uris,
+                              (int) strlen (p->uris));
       break;
-    case INFO_TEXT:
-      gtk_selection_data_set_text (sd, p->text, -1);
-      break;
-    default:
-      break;
+    case INFO_TEXT: gtk_selection_data_set_text (sd, p->text, -1); break;
+    default: break;
     }
 }
 
@@ -58,19 +60,16 @@ gbk_clipboard_set_files (GtkWidget *widget, GPtrArray *paths, bool cut)
   static char t_gnome[] = GNOME_TARGET, t_uris[] = URI_TARGET, t_utf8[] = "UTF8_STRING",
               t_plain_utf8[] = "text/plain;charset=utf-8", t_plain[] = "text/plain";
   const GtkTargetEntry targets[] = {
-    { t_gnome, 0, INFO_GNOME },
-    { t_uris, 0, INFO_URIS },
-    { t_utf8, 0, INFO_TEXT },
-    { t_plain_utf8, 0, INFO_TEXT },
-    { t_plain, 0, INFO_TEXT },
+    { t_gnome, 0, INFO_GNOME },     { t_uris, 0, INFO_URIS },  { t_utf8, 0, INFO_TEXT },
+    { t_plain_utf8, 0, INFO_TEXT }, { t_plain, 0, INFO_TEXT },
   };
   Payload *p = g_new0 (Payload, 1);
   p->gnome = gbk_clip_format_gnome (paths, cut);
   p->uris = gbk_clip_format_uri_list (paths);
   p->text = gbk_clip_format_text (paths);
   GtkClipboard *cb = gtk_widget_get_clipboard (widget, GDK_SELECTION_CLIPBOARD);
-  if (gtk_clipboard_set_with_data (cb, targets, G_N_ELEMENTS (targets), payload_get,
-                                   payload_clear, p))
+  if (gtk_clipboard_set_with_data (cb, targets, G_N_ELEMENTS (targets), payload_get, payload_clear,
+                                   p))
     owned = p;
   else
     payload_clear (cb, p);
@@ -104,9 +103,8 @@ got_uris (GtkSelectionData *sd, void *p)
   Get *g = p;
   int len = gtk_selection_data_get_length (sd);
   bool cut = false;
-  g_autoptr (GPtrArray) paths =
-      gbk_clip_parse ((const char *) gtk_selection_data_get_data (sd), len > 0 ? (size_t) len : 0,
-                      false, &cut);
+  g_autoptr (GPtrArray) paths = gbk_clip_parse ((const char *) gtk_selection_data_get_data (sd),
+                                                len > 0 ? (size_t) len : 0, false, &cut);
   g->fn (paths, false, g->data);
 }
 
@@ -118,8 +116,8 @@ got_gnome (GtkSelectionData *sd, void *p)
   if (len > 0)
     {
       bool cut = false;
-      g_autoptr (GPtrArray) paths =
-          gbk_clip_parse ((const char *) gtk_selection_data_get_data (sd), (size_t) len, true, &cut);
+      g_autoptr (GPtrArray) paths = gbk_clip_parse ((const char *) gtk_selection_data_get_data (sd),
+                                                    (size_t) len, true, &cut);
       g->fn (paths, cut, g->data);
       return;
     }

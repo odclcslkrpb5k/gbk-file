@@ -37,7 +37,11 @@ struct _GbkDevices
 
 G_DEFINE_FINAL_TYPE (GbkDevices, gbk_devices, G_TYPE_OBJECT)
 
-enum { SIGNAL_PRE_UNMOUNT, N_SIGNALS };
+enum
+{
+  SIGNAL_PRE_UNMOUNT,
+  N_SIGNALS
+};
 static guint signals[N_SIGNALS];
 
 static GVolumeMonitor *test_monitor;
@@ -263,14 +267,12 @@ gbk_devices_start (GbkDevices *d)
     return;
   d->monitor = test_monitor != nullptr ? g_object_ref (test_monitor) : g_volume_monitor_get ();
   static const char *const changes[] = {
-    "drive-connected", "drive-disconnected", "drive-changed",
-    "volume-added", "volume-removed", "volume-changed",
-    "mount-added", "mount-removed", "mount-changed",
+    "drive-connected", "drive-disconnected", "drive-changed", "volume-added",  "volume-removed",
+    "volume-changed",  "mount-added",        "mount-removed", "mount-changed",
   };
   for (size_t i = 0; i < G_N_ELEMENTS (changes); i++)
     gbk_connect (G_OBJECT (d), d->monitor, changes[i], G_CALLBACK (on_monitor_changed), d);
-  gbk_connect (G_OBJECT (d), d->monitor, "mount-pre-unmount",
-               G_CALLBACK (on_mount_pre_unmount), d);
+  gbk_connect (G_OBJECT (d), d->monitor, "mount-pre-unmount", G_CALLBACK (on_mount_pre_unmount), d);
   rebuild (d);
 }
 
@@ -300,7 +302,12 @@ find (GbkDevices *d, const char *id)
 
 /* ---- operations ---- */
 
-typedef enum { OP_MOUNT, OP_UNMOUNT, OP_EJECT } OpKind;
+typedef enum
+{
+  OP_MOUNT,
+  OP_UNMOUNT,
+  OP_EJECT
+} OpKind;
 
 /* One operation in flight. Holds the device's objects (the list may be rebuilt meanwhile)
  * and the GbkDevices; the owner only weakly. */
@@ -320,8 +327,8 @@ typedef struct
 } Pending;
 
 static Pending *
-pending_new (GbkDevices *d, const Device *dev, OpKind kind, GMountOperation *op,
-             GObject *owner, GbkDeviceDone done)
+pending_new (GbkDevices *d, const Device *dev, OpKind kind, GMountOperation *op, GObject *owner,
+             GbkDeviceDone done)
 {
   Pending *p = g_new0 (Pending, 1);
   p->d = g_object_ref (d);
@@ -411,11 +418,8 @@ begin_removal (Pending *p)
     case EJECT_DRIVE:
       g_drive_eject_with_operation (p->drive, flags, p->op, nullptr, on_gone, p);
       break;
-    case STOP_DRIVE:
-      g_drive_stop (p->drive, flags, p->op, nullptr, on_gone, p);
-      break;
-    default:
-      gbk_fatal ("bad eject kind %d", (int) p->eject);
+    case STOP_DRIVE: g_drive_stop (p->drive, flags, p->op, nullptr, on_gone, p); break;
+    default: gbk_fatal ("bad eject kind %d", (int) p->eject);
     }
 }
 
@@ -547,9 +551,9 @@ static void
 gbk_devices_class_init (GbkDevicesClass *klass)
 {
   G_OBJECT_CLASS (klass)->finalize = gbk_devices_finalize;
-  signals[SIGNAL_PRE_UNMOUNT] = g_signal_new ("pre-unmount", G_TYPE_FROM_CLASS (klass),
-                                              G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                              G_TYPE_NONE, 1, G_TYPE_STRING);
+  signals[SIGNAL_PRE_UNMOUNT]
+      = g_signal_new ("pre-unmount", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr,
+                      nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_STRING);
 }
 
 static void

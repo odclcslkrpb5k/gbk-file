@@ -1,6 +1,6 @@
 #include "command.h"
 
-G_DEFINE_QUARK (gbk-command-error-quark, gbk_command_error)
+G_DEFINE_QUARK (gbk - command - error - quark, gbk_command_error)
 
 struct GbkCommand
 {

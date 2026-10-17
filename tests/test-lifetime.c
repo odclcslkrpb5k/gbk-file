@@ -3,15 +3,22 @@
 /* A minimal GObject with one signal, "ping", to act as the emitting instance. */
 #define TEST_TYPE_PINGER (test_pinger_get_type ())
 G_DECLARE_FINAL_TYPE (TestPinger, test_pinger, TEST, PINGER, GObject)
-struct _TestPinger { GObject parent_instance; };
+struct _TestPinger
+{
+  GObject parent_instance;
+};
 G_DEFINE_FINAL_TYPE (TestPinger, test_pinger, G_TYPE_OBJECT)
 static guint ping_signal;
-static void test_pinger_class_init (TestPingerClass *klass)
+static void
+test_pinger_class_init (TestPingerClass *klass)
 {
-  ping_signal = g_signal_new ("ping", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
-                              0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  ping_signal = g_signal_new ("ping", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr,
+                              nullptr, nullptr, G_TYPE_NONE, 0);
 }
-static void test_pinger_init (TestPinger *self G_GNUC_UNUSED) {}
+static void
+test_pinger_init (TestPinger *self G_GNUC_UNUSED)
+{
+}
 
 static void
 ping (TestPinger *p)
@@ -264,7 +271,8 @@ main (int argc, char **argv)
   g_test_add_func ("/lifetime/signal/fires", test_signal_fires);
   g_test_add_func ("/lifetime/signal/owner-disposed-first", test_signal_owner_disposed_first);
   g_test_add_func ("/lifetime/signal/owner-run-dispose", test_signal_owner_run_dispose);
-  g_test_add_func ("/lifetime/signal/instance-finalized-first", test_signal_instance_finalized_first);
+  g_test_add_func ("/lifetime/signal/instance-finalized-first",
+                   test_signal_instance_finalized_first);
   g_test_add_func ("/lifetime/source/runs-until-false", test_source_runs_until_false);
   g_test_add_func ("/lifetime/source/owner-disposed-first", test_source_owner_disposed_first);
   g_test_add_func ("/lifetime/source/owner-run-dispose", test_source_owner_run_dispose);

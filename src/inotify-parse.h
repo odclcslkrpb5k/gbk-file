@@ -3,8 +3,7 @@
 
 /* `name` is nullptr for events about the watched directory itself. Otherwise it is
  * NUL-terminated and `name_len` bytes long. */
-typedef void (*GbkInotifyFn) (int wd, uint32_t mask, const char *name, size_t name_len,
-                              void *data);
+typedef void (*GbkInotifyFn) (int wd, uint32_t mask, const char *name, size_t name_len, void *data);
 
 /* Calls fn for each complete event. Returns false if the buffer is malformed (an event
  * header or name runs past the end); events before the bad one have been delivered. */

@@ -40,7 +40,8 @@ extern gchar *(g_path_get_dirname) (const gchar *file_name) GBK_GALLOC;
 extern gchar *(g_path_get_basename) (const gchar *file_name) GBK_GALLOC;
 extern gchar *(g_filename_display_name) (const gchar *filename) GBK_GALLOC;
 extern gchar *(g_filename_display_basename) (const gchar *filename) GBK_GALLOC;
-extern gchar *(g_canonicalize_filename) (const gchar *filename, const gchar *relative_to) GBK_GALLOC;
+extern gchar *(g_canonicalize_filename) (const gchar *filename,
+                                         const gchar *relative_to) GBK_GALLOC;
 extern gchar *(g_ascii_strdown) (const gchar *str, gssize len) GBK_GALLOC;
 extern gchar *(g_utf8_casefold) (const gchar *str, gssize len) GBK_GALLOC;
 extern gchar *(g_utf8_make_valid) (const gchar *str, gssize len) GBK_GALLOC;
@@ -53,9 +54,12 @@ extern gchar *(g_strdup) (const gchar *str) GBK_GALLOC;
 extern gchar *(g_strndup) (const gchar *str, gsize n) GBK_GALLOC;
 extern gpointer (g_memdup2) (gconstpointer mem, gsize byte_size) GBK_GALLOC;
 
-extern gchar *(g_utf8_normalize) (const gchar *str, gssize len, GNormalizeMode mode) GBK_GALLOC_MAYBE;
-extern gchar *(g_filename_to_uri) (const gchar *filename, const gchar *hostname, GError **error) GBK_GALLOC_MAYBE;
-extern gchar *(g_filename_from_uri) (const gchar *uri, gchar **hostname, GError **error) GBK_GALLOC_MAYBE;
+extern gchar *(g_utf8_normalize) (const gchar *str, gssize len,
+                                  GNormalizeMode mode) GBK_GALLOC_MAYBE;
+extern gchar *(g_filename_to_uri) (const gchar *filename, const gchar *hostname,
+                                   GError **error) GBK_GALLOC_MAYBE;
+extern gchar *(g_filename_from_uri) (const gchar *uri, gchar **hostname,
+                                     GError **error) GBK_GALLOC_MAYBE;
 
 extern gchar **(g_strsplit) (const gchar *string, const gchar *delimiter, gint max_tokens)
-  __attribute__ ((malloc, malloc (g_strfreev, 1), returns_nonnull));
+    __attribute__ ((malloc, malloc (g_strfreev, 1), returns_nonnull));

@@ -31,7 +31,12 @@ struct _GbkBrowser
 
 G_DEFINE_FINAL_TYPE (GbkBrowser, gbk_browser, GTK_TYPE_BOX)
 
-enum { SIGNAL_PATH_CHANGED, SIGNAL_STATUS_CHANGED, N_SIGNALS };
+enum
+{
+  SIGNAL_PATH_CHANGED,
+  SIGNAL_STATUS_CHANGED,
+  N_SIGNALS
+};
 static guint signals[N_SIGNALS];
 
 static void
@@ -205,8 +210,8 @@ on_model_state (GbkDirModel *m, GbkBrowser *b)
   /* The directory vanished (deleted, moved, unmounted) or never existed: walk up to the
    * nearest ancestor. Each level is another async attempt, so nothing blocks. */
   bool missing = state == GBK_DIR_GONE
-                 || (state == GBK_DIR_ERROR && (gbk_dir_model_error (m) == ENOENT
-                                                || gbk_dir_model_error (m) == ENOTDIR));
+                 || (state == GBK_DIR_ERROR
+                     && (gbk_dir_model_error (m) == ENOENT || gbk_dir_model_error (m) == ENOTDIR));
   if (missing && !g_str_equal (b->path, "/"))
     {
       g_autofree char *parent = g_path_get_dirname (b->path);
@@ -231,10 +236,10 @@ set_model (GbkBrowser *b, GbkDirModel *m)
     {
       gbk_dir_model_set_show_hidden (m, b->show_hidden);
       gbk_dir_model_set_sort (m, b->sort);
-      b->model_state_id = gbk_connect (G_OBJECT (b), m, "state-changed",
-                                       G_CALLBACK (on_model_state), b);
-      b->model_changed_id = gbk_connect (G_OBJECT (b), m, "changed",
-                                         G_CALLBACK (on_model_changed), b);
+      b->model_state_id
+          = gbk_connect (G_OBJECT (b), m, "state-changed", G_CALLBACK (on_model_state), b);
+      b->model_changed_id
+          = gbk_connect (G_OBJECT (b), m, "changed", G_CALLBACK (on_model_changed), b);
     }
   gbk_view_set_model (b->view, m);
 }
@@ -402,12 +407,12 @@ gbk_browser_class_init (GbkBrowserClass *klass)
 {
   G_OBJECT_CLASS (klass)->dispose = gbk_browser_dispose;
   G_OBJECT_CLASS (klass)->finalize = gbk_browser_finalize;
-  signals[SIGNAL_PATH_CHANGED] = g_signal_new ("path-changed", G_TYPE_FROM_CLASS (klass),
-                                               G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                               G_TYPE_NONE, 0);
-  signals[SIGNAL_STATUS_CHANGED] = g_signal_new ("status-changed", G_TYPE_FROM_CLASS (klass),
-                                                 G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                                 G_TYPE_NONE, 0);
+  signals[SIGNAL_PATH_CHANGED]
+      = g_signal_new ("path-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr,
+                      nullptr, nullptr, G_TYPE_NONE, 0);
+  signals[SIGNAL_STATUS_CHANGED]
+      = g_signal_new ("status-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr,
+                      nullptr, nullptr, G_TYPE_NONE, 0);
 }
 
 static void
@@ -420,8 +425,7 @@ gbk_browser_init (GbkBrowser *b)
 GbkBrowser *
 gbk_browser_new (GbkContext *ctx, bool show_hidden, GbkSortMode sort)
 {
-  GbkBrowser *b = g_object_new (GBK_TYPE_BROWSER, "orientation", GTK_ORIENTATION_VERTICAL,
-                                nullptr);
+  GbkBrowser *b = g_object_new (GBK_TYPE_BROWSER, "orientation", GTK_ORIENTATION_VERTICAL, nullptr);
   b->ctx = gbk_context_ref (ctx);
   b->show_hidden = show_hidden;
   b->sort = sort;

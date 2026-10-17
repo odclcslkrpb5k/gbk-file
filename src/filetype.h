@@ -53,8 +53,8 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC (GbkTypeBuilder, gbk_type_builder_free)
 
 /* Add one mapping. Returns false (and adds nothing) if `ext` or `mime` is malformed.
  * `ext` has no leading dot ("tar.gz"). Weight is clamped to 0..1000. */
-bool gbk_type_builder_add (GbkTypeBuilder *b, const char *ext, const char *mime,
-                           int weight, bool case_sensitive);
+bool gbk_type_builder_add (GbkTypeBuilder *b, const char *ext, const char *mime, int weight,
+                           bool case_sensitive);
 
 /* Parse shared-mime-info globs2 data (need not be NUL-terminated). Lines that are malformed
  * or aren't plain "*.ext" globs are skipped. Returns the number of mappings added. */

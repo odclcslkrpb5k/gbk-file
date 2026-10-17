@@ -36,8 +36,8 @@ static GbkConfig *
 config_new_empty (void)
 {
   GbkConfig *c = g_new0 (GbkConfig, 1);
-  c->interpreters = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
-                                           (GDestroyNotify) g_strfreev);
+  c->interpreters
+      = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_strfreev);
   c->type_overrides = g_ptr_array_new_with_free_func (g_free);
   c->actions = g_ptr_array_new_with_free_func ((GDestroyNotify) action_free);
   c->sort = GBK_SORT_NAME;
@@ -78,8 +78,7 @@ typedef struct
   GbkConfig *c;
 } Loader;
 
-G_GNUC_PRINTF (2, 3) static void
-fail (Loader *l, const char *format, ...)
+G_GNUC_PRINTF (2, 3) static void fail (Loader *l, const char *format, ...)
 {
   va_list args;
   va_start (args, format);
@@ -266,7 +265,8 @@ valid_type_pattern (const char *p)
   if (slash == nullptr || slash == p || slash[1] == '\0' || strchr (slash + 1, '/') != nullptr)
     return false;
   const char *star = strchr (p, '*');
-  return star == nullptr || (star == slash + 1 && star[1] == '\0');   /* only a trailing star after the slash */
+  return star == nullptr
+         || (star == slash + 1 && star[1] == '\0');   /* only a trailing star after the slash */
 }
 
 static void
@@ -424,8 +424,8 @@ gbk_config_apply_types (const GbkConfig *c, GbkTypeBuilder *b)
   for (guint i = 0; i + 1 < c->type_overrides->len; i += 2)
     {
       bool ok = gbk_type_builder_add (b, g_ptr_array_index (c->type_overrides, i),
-                                      g_ptr_array_index (c->type_overrides, i + 1),
-                                      OVERRIDE_WEIGHT, false);
+                                      g_ptr_array_index (c->type_overrides, i + 1), OVERRIDE_WEIGHT,
+                                      false);
       g_assert (ok);    /* validated at load */
     }
 }

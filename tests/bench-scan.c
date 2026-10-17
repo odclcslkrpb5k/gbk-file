@@ -97,8 +97,9 @@ breakdown (const char *dir, GbkTypeTable *types)
 
   struct statx st;
   for (guint i = 0; i < names->len; i++)
-    statx (dfd, g_ptr_array_index (names, i), AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT
-           | AT_STATX_DONT_SYNC, STATX_TYPE | STATX_MODE | STATX_MTIME | STATX_SIZE, &st);
+    statx (dfd, g_ptr_array_index (names, i),
+           AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT | AT_STATX_DONT_SYNC,
+           STATX_TYPE | STATX_MODE | STATX_MTIME | STATX_SIZE, &st);
   int64_t t2 = now_us ();
 
   g_autoptr (GPtrArray) entries = g_ptr_array_new_with_free_func ((GDestroyNotify) gbk_entry_free);

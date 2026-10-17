@@ -6,9 +6,9 @@
 
 enum : uint8_t
 {
-  GBK_ENTRY_HIDDEN      = 1 << 0,   /* leading '.' or trailing '~' */
-  GBK_ENTRY_SYMLINK     = 1 << 1,   /* the entry itself is a symlink (kind is its target) */
-  GBK_ENTRY_EXECUTABLE  = 1 << 2,   /* regular file with any exec bit */
+  GBK_ENTRY_HIDDEN = 1 << 0,   /* leading '.' or trailing '~' */
+  GBK_ENTRY_SYMLINK = 1 << 1,   /* the entry itself is a symlink (kind is its target) */
+  GBK_ENTRY_EXECUTABLE = 1 << 2,   /* regular file with any exec bit */
   GBK_ENTRY_STAT_FAILED = 1 << 3,   /* statx failed; kind from d_type, times/size unknown */
 };
 
@@ -63,8 +63,8 @@ typedef struct
 
 /* Pure constructor. `name` must be a valid filename component: 1..255 bytes, no '/' or NUL.
  * Returns nullptr for an invalid name. */
-[[nodiscard]] GbkEntry *gbk_entry_new (const char *name, size_t name_len,
-                                       const GbkEntryInfo *info, const GbkTypeTable *types);
+[[nodiscard]] GbkEntry *gbk_entry_new (const char *name, size_t name_len, const GbkEntryInfo *info,
+                                       const GbkTypeTable *types);
 
 /* statx `name` relative to `dirfd` (following a symlink for the target's kind).
  * `d_type` (DT_*) is the fallback kind if statx fails. Returns nullptr if the entry no

@@ -41,7 +41,8 @@ stall_check (gint64 start, const char *kind, const char *name, const char *detai
   gint64 took = g_get_monotonic_time () - start;
   if (took > stall_limit_us)
     gbk_fatal ("main loop blocked for %" G_GINT64_FORMAT " ms (GBK_STALL_MS=%" G_GINT64_FORMAT
-               ") by %s %s%s", took / 1000, stall_limit_us / 1000, kind, name, detail);
+               ") by %s %s%s",
+               took / 1000, stall_limit_us / 1000, kind, name, detail);
 }
 
 /* ---- Signals ----
@@ -76,8 +77,8 @@ timed_marshal (GClosure *closure, GValue *return_value, guint n_param_values,
   Handler *h = marshal_data;
   bool outer = h->depth++ == 0;
   gint64 start = outer ? stall_start () : 0;
-  g_cclosure_marshal_generic (closure, return_value, n_param_values, param_values,
-                              invocation_hint, nullptr);
+  g_cclosure_marshal_generic (closure, return_value, n_param_values, param_values, invocation_hint,
+                              nullptr);
   h->depth--;
   if (start != 0)
     {
@@ -87,8 +88,8 @@ timed_marshal (GClosure *closure, GValue *return_value, guint n_param_values,
 }
 
 gulong
-gbk_connect_named (GObject *owner, gpointer instance, const char *signal,
-                   GCallback callback, void *data, bool after, const char *name)
+gbk_connect_named (GObject *owner, gpointer instance, const char *signal, GCallback callback,
+                   void *data, bool after, const char *name)
 {
   g_assert (G_IS_OBJECT (owner));
   g_assert (G_IS_OBJECT (instance));
@@ -111,7 +112,6 @@ gbk_connect_named (GObject *owner, gpointer instance, const char *signal,
     gbk_fatal ("gbk_connect: no signal \"%s\" on %s", signal, G_OBJECT_TYPE_NAME (instance));
   return id;
 }
-
 
 /* ---- Sources ----
  * The record is freed only by the source's destroy notify, which GLib defers until any
@@ -197,8 +197,8 @@ add_source (GObject *owner, GSource *source, GbkSourceFunc fn, GbkFdFunc fd_fn, 
   /* A unix fd source calls its callback as GUnixFDSourceFunc; G_SOURCE_FUNC is GLib's
    * sanctioned cast for registering it. */
   g_source_set_callback (source,
-                         fd_fn != nullptr ? G_SOURCE_FUNC (fd_source_dispatch) : source_dispatch,
-                         r, source_destroyed);
+                         fd_fn != nullptr ? G_SOURCE_FUNC (fd_source_dispatch) : source_dispatch, r,
+                         source_destroyed);
   guint id = g_source_attach (source, nullptr);
   g_source_unref (source);         /* the main context holds it now */
   return id;

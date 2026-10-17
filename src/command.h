@@ -20,8 +20,7 @@ typedef struct GbkCommand GbkCommand;
 GQuark gbk_command_error_quark (void);
 
 /* `allowed` lists the placeholder letters valid in this context, e.g. "d" or "dfF". */
-[[nodiscard]] GbkCommand *gbk_command_parse (const char *tmpl, const char *allowed,
-                                             GError **error);
+[[nodiscard]] GbkCommand *gbk_command_parse (const char *tmpl, const char *allowed, GError **error);
 void gbk_command_free (GbkCommand *c);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (GbkCommand, gbk_command_free)
 

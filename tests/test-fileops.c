@@ -123,7 +123,12 @@ run (GbkOpKind kind, GPtrArray *src, const char *dest_rel, Script *s, GPtrArray 
 }
 
 #define assert_content(rel, expected) \
-  do { g_autofree char *c_ = slurp (rel); g_assert_cmpstr (c_, ==, expected); } while (0)
+  do \
+    { \
+      g_autofree char *c_ = slurp (rel); \
+      g_assert_cmpstr (c_, ==, expected); \
+    } \
+  while (0)
 
 /* ---- tests ---- */
 
@@ -278,8 +283,8 @@ test_trash (void)
   g_assert_true (run (GBK_OP_TRASH, src, nullptr, &s, nullptr));
   g_assert_false (exists ("t/gone.txt"));
   g_assert_cmpint (s.errors, ==, 0);
-  g_autofree char *trashed = g_build_filename (g_get_user_data_dir (), "Trash", "files",
-                                               "gone.txt", nullptr);
+  g_autofree char *trashed
+      = g_build_filename (g_get_user_data_dir (), "Trash", "files", "gone.txt", nullptr);
   g_assert_true (g_file_test (trashed, G_FILE_TEST_EXISTS));
 }
 
@@ -376,12 +381,13 @@ test_copy_keeps_metadata (void)
   g_assert_cmpint (symlink ("f.txt", lnk), ==, 0);
   g_autofree char *fifo = P ("m/src/fifo");
   g_assert_cmpint (mkfifo (fifo, 0640), ==, 0);
-  bool have_xattr = setxattr (f, "user.gbk", "v1", 2, 0) == 0
-                    && setxattr (sub, "user.gbk", "v2", 2, 0) == 0;
+  bool have_xattr
+      = setxattr (f, "user.gbk", "v1", 2, 0) == 0 && setxattr (sub, "user.gbk", "v2", 2, 0) == 0;
   if (!have_xattr)
     g_test_message ("filesystem without user xattrs: not checking them");
 
-  const struct timespec old[2] = { { .tv_sec = 1000000000 }, { .tv_sec = 1100000000, .tv_nsec = 123 } };
+  const struct timespec old[2]
+      = { { .tv_sec = 1000000000 }, { .tv_sec = 1100000000, .tv_nsec = 123 } };
   g_assert_cmpint (utimensat (AT_FDCWD, f, old, 0), ==, 0);
   g_assert_cmpint (utimensat (AT_FDCWD, lnk, old, AT_SYMLINK_NOFOLLOW), ==, 0);
   g_assert_cmpint (utimensat (AT_FDCWD, sub, old, 0), ==, 0);
@@ -437,8 +443,12 @@ static void
 test_numbered_name (void)
 {
   const char *cases[][2] = {
-    { "a.txt", "a (3).txt" }, { "x.tar.gz", "x (3).tar.gz" }, { ".bashrc", ".bashrc (3)" },
-    { "New Folder", "New Folder (3)" }, { "", " (3)" }, { "a.", "a (3)." },
+    { "a.txt", "a (3).txt" },
+    { "x.tar.gz", "x (3).tar.gz" },
+    { ".bashrc", ".bashrc (3)" },
+    { "New Folder", "New Folder (3)" },
+    { "", " (3)" },
+    { "a.", "a (3)." },
   };
   for (size_t i = 0; i < G_N_ELEMENTS (cases); i++)
     {
@@ -533,7 +543,8 @@ test_info (void)
   mk ("i/f.txt", "hello");
   g_autofree char *f = P ("i/f.txt");
   g_assert_cmpint (chmod (f, 0640), ==, 0);
-  const struct timespec ts[2] = { { .tv_sec = 1000000000, .tv_nsec = 5 }, { .tv_sec = 1500000000, .tv_nsec = 7 } };
+  const struct timespec ts[2]
+      = { { .tv_sec = 1000000000, .tv_nsec = 5 }, { .tv_sec = 1500000000, .tv_nsec = 7 } };
   g_assert_cmpint (utimensat (AT_FDCWD, f, ts, 0), ==, 0);
   g_autoptr (GbkFileInfo) i = gbk_ops_info (f, nullptr);
   g_assert_nonnull (i);
@@ -582,9 +593,13 @@ fresh_root (void)
   root = g_steal_pointer (&dir);
 }
 
-#define ADD(path, fn) \
-  g_test_add_func (path, fn##_wrapped)
-#define WRAP(fn) static void fn##_wrapped (void) { fresh_root (); fn (); }
+#define ADD(path, fn) g_test_add_func (path, fn##_wrapped)
+#define WRAP(fn) \
+  static void fn##_wrapped (void) \
+  { \
+    fresh_root (); \
+    fn (); \
+  }
 WRAP (test_copy_tree)
 WRAP (test_copy_conflicts)
 WRAP (test_copy_merge_and_apply_all)

@@ -34,7 +34,7 @@
 
 /* Each of these turns a check into nothing; under G_DISABLE_ASSERT, g_assert_not_reached()
  * becomes __builtin_unreachable(): undefined behaviour where an abort was meant. */
-#if defined (G_DISABLE_ASSERT) || defined (G_DISABLE_CHECKS) || defined (G_DISABLE_CAST_CHECKS)
+#if defined(G_DISABLE_ASSERT) || defined(G_DISABLE_CHECKS) || defined(G_DISABLE_CAST_CHECKS)
 #error "G_DISABLE_ASSERT, G_DISABLE_CHECKS and G_DISABLE_CAST_CHECKS must never be defined"
 #endif
 
@@ -89,10 +89,10 @@
 
 /* --- Raw signal connections and main-loop sources. ---
  * A callback that outlives the object it points at is the classic GTK crash. Use
- * gbk_connect() / gbk_idle_add() / gbk_timeout_add() / gbk_fd_watch() from lifetime.h: every callback has an
- * owner and is disconnected/removed automatically when the owner is destroyed.
- * Only lifetime.c may use the raw APIs. Macros must be #undef'd before poisoning, because
- * GCC does not flag a poisoned name inside a macro defined before the poison. */
+ * gbk_connect() / gbk_idle_add() / gbk_timeout_add() / gbk_fd_watch() from lifetime.h: every
+ * callback has an owner and is disconnected/removed automatically when the owner is destroyed. Only
+ * lifetime.c may use the raw APIs. Macros must be #undef'd before poisoning, because GCC does not
+ * flag a poisoned name inside a macro defined before the poison. */
 #ifndef GBK_LIFETIME_IMPL
 #undef g_signal_connect
 #undef g_signal_connect_after

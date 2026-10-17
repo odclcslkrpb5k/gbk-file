@@ -20,7 +20,13 @@ struct _GbkPathbar
 
 G_DEFINE_FINAL_TYPE (GbkPathbar, gbk_pathbar, GTK_TYPE_BOX)
 
-enum { SIGNAL_NAVIGATE, SIGNAL_CONTEXT_MENU, SIGNAL_DROP, N_SIGNALS };
+enum
+{
+  SIGNAL_NAVIGATE,
+  SIGNAL_CONTEXT_MENU,
+  SIGNAL_DROP,
+  N_SIGNALS
+};
 static guint signals[N_SIGNALS];
 
 static bool
@@ -61,8 +67,8 @@ static gboolean
 on_drag_motion (GtkWidget *button, GdkDragContext *ctx, int x G_GNUC_UNUSED, int y G_GNUC_UNUSED,
                 guint time, GbkPathbar *bar G_GNUC_UNUSED)
 {
-  GdkDragAction action = gtk_drag_dest_find_target (button, ctx, nullptr) != GDK_NONE
-                           ? gbk_dnd_action (ctx) : 0;
+  GdkDragAction action
+      = gtk_drag_dest_find_target (button, ctx, nullptr) != GDK_NONE ? gbk_dnd_action (ctx) : 0;
   if (action != 0)
     gtk_drag_highlight (button);
   gdk_drag_status (ctx, action, time);
@@ -131,7 +137,8 @@ make_button (GbkPathbar *bar, const char *path, const char *label, const char *i
   gbk_connect (G_OBJECT (bar), button, "drag-motion", G_CALLBACK (on_drag_motion), bar);
   gbk_connect (G_OBJECT (bar), button, "drag-leave", G_CALLBACK (on_drag_leave), bar);
   gbk_connect (G_OBJECT (bar), button, "drag-drop", G_CALLBACK (on_drag_drop), bar);
-  gbk_connect (G_OBJECT (bar), button, "drag-data-received", G_CALLBACK (on_drag_data_received), bar);
+  gbk_connect (G_OBJECT (bar), button, "drag-data-received", G_CALLBACK (on_drag_data_received),
+               bar);
   return button;
 }
 
@@ -145,12 +152,11 @@ rebuild (GbkPathbar *bar)
   const char *home = g_get_home_dir ();
   bool in_home = home != nullptr && !g_str_equal (home, "/") && is_prefix_dir (home, bar->deep);
   const char *start = in_home ? home : "/";
-  g_autofree char *start_label = in_home ? g_filename_display_basename (home)
-                                         : g_strdup ("File System");
-  gtk_box_pack_start (bar->buttons,
-                      make_button (bar, start, start_label,
-                                   in_home ? "user-home" : "drive-harddisk"),
-                      false, false, 0);
+  g_autofree char *start_label
+      = in_home ? g_filename_display_basename (home) : g_strdup ("File System");
+  gtk_box_pack_start (
+      bar->buttons, make_button (bar, start, start_label, in_home ? "user-home" : "drive-harddisk"),
+      false, false, 0);
 
   /* One button per component below the start. */
   const char *rest = bar->deep + strlen (start);
@@ -350,14 +356,13 @@ static void
 gbk_pathbar_class_init (GbkPathbarClass *klass)
 {
   G_OBJECT_CLASS (klass)->finalize = gbk_pathbar_finalize;
-  signals[SIGNAL_NAVIGATE] = g_signal_new ("navigate", G_TYPE_FROM_CLASS (klass),
-                                           G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                           G_TYPE_NONE, 1, G_TYPE_STRING);
+  signals[SIGNAL_NAVIGATE]
+      = g_signal_new ("navigate", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr,
+                      nullptr, G_TYPE_NONE, 1, G_TYPE_STRING);
   /* GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE: the event is passed through, not copied. */
-  signals[SIGNAL_CONTEXT_MENU] = g_signal_new ("context-menu", G_TYPE_FROM_CLASS (klass),
-                                               G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                               G_TYPE_NONE, 2, G_TYPE_STRING,
-                                               GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  signals[SIGNAL_CONTEXT_MENU] = g_signal_new (
+      "context-menu", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
+      G_TYPE_NONE, 2, G_TYPE_STRING, GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
   signals[SIGNAL_DROP] = g_signal_new ("drop", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
                                        nullptr, nullptr, nullptr, G_TYPE_NONE, 3, G_TYPE_STRING,
                                        G_TYPE_POINTER, GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);

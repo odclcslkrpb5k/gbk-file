@@ -120,10 +120,10 @@ bool
 gbk_open_default (GPtrArray *items, GAppLaunchContext *launch, GError **error)
 {
   /* Group by default application so e.g. 5 images open in one viewer, not 5 viewers. */
-  g_autoptr (GHashTable) by_app = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
-                                                         (GDestroyNotify) g_ptr_array_unref);
-  g_autoptr (GHashTable) apps = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
-                                                       g_object_unref);
+  g_autoptr (GHashTable) by_app
+      = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_ptr_array_unref);
+  g_autoptr (GHashTable) apps
+      = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
   for (guint i = 0; i < items->len; i++)
     {
       GbkItem *it = g_ptr_array_index (items, i);

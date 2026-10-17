@@ -52,17 +52,19 @@ bool gbk_open_can_execute (const GbkItem *it);
 
 /* Execute `it`, in the terminal or not. `cwd` is the directory being viewed. */
 [[nodiscard]] bool gbk_open_execute (const GbkConfig *config, const GbkItem *it, bool terminal,
-                       const char *cwd, GError **error);
+                                     const char *cwd, GError **error);
 
 /* Open items with the default application for each one's type (one launch per app).
  * `launch` may be nullptr (no startup notification). */
 [[nodiscard]] bool gbk_open_default (GPtrArray *items, GAppLaunchContext *launch, GError **error);
 
 /* Open items with a specific application. */
-[[nodiscard]] bool gbk_open_with (GAppInfo *app, GPtrArray *items, GAppLaunchContext *launch, GError **error);
+[[nodiscard]] bool gbk_open_with (GAppInfo *app, GPtrArray *items, GAppLaunchContext *launch,
+                                  GError **error);
 
 /* Run a configured action on items (directories included when the action allows). */
-[[nodiscard]] bool gbk_open_action (const GbkAction *a, GPtrArray *items, const char *cwd, GError **error);
+[[nodiscard]] bool gbk_open_action (const GbkAction *a, GPtrArray *items, const char *cwd,
+                                    GError **error);
 
 /* F4 / "Open Terminal Here". */
 [[nodiscard]] bool gbk_open_terminal (const GbkConfig *config, const char *dir, GError **error);

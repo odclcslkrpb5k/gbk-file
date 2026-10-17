@@ -73,4 +73,5 @@ GbkHandle gbk_view_item_at (GbkView *v, double x, double y);   /* widget coordin
  * folder)? `from_self`: the drag started in this view. */
 bool gbk_view_drop_target_at (GbkView *v, double x, double y, bool from_self, GbkHandle *folder);
 /* Tests: as if `uri_list` were dropped at (x, y) from another app. */
-bool gbk_view_drop_for_test (GbkView *v, const char *uri_list, double x, double y, GdkEvent *trigger);
+bool gbk_view_drop_for_test (GbkView *v, const char *uri_list, double x, double y,
+                             GdkEvent *trigger);

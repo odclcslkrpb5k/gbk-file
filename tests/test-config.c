@@ -44,8 +44,8 @@ static void
 test_example_conf (void)
 {
   /* docs/example.conf must always load cleanly: the documentation can't rot. */
-  g_autofree char *path = g_build_filename (g_getenv ("GBK_SOURCE_ROOT"), "docs", "example.conf",
-                                            nullptr);
+  g_autofree char *path
+      = g_build_filename (g_getenv ("GBK_SOURCE_ROOT"), "docs", "example.conf", nullptr);
   g_autoptr (GPtrArray) errors = g_ptr_array_new_with_free_func (g_free);
   g_autoptr (GbkConfig) c = gbk_config_load_file (path, errors);
   for (guint i = 0; i < errors->len; i++)
@@ -66,21 +66,20 @@ static void
 test_full (void)
 {
   g_autoptr (GPtrArray) errors = g_ptr_array_new_with_free_func (g_free);
-  g_autoptr (GbkConfig) c = load (
-      "[General]\n"
-      "Terminal=st -d %d\n"
-      "TerminalRun=st -d %d -e %c\n"
-      "ShowHidden=true\n"
-      "SortBy=modified\n"
-      "[Interpreters]\n"
-      "py=python3 -u\n"
-      "[Types]\n"
-      "foo=application/x-foo\n"
-      "[Action view]\n"
-      "Name=View\n"
-      "Types=image/*\n"
-      "Command=viewer %f\n",
-      errors);
+  g_autoptr (GbkConfig) c = load ("[General]\n"
+                                  "Terminal=st -d %d\n"
+                                  "TerminalRun=st -d %d -e %c\n"
+                                  "ShowHidden=true\n"
+                                  "SortBy=modified\n"
+                                  "[Interpreters]\n"
+                                  "py=python3 -u\n"
+                                  "[Types]\n"
+                                  "foo=application/x-foo\n"
+                                  "[Action view]\n"
+                                  "Name=View\n"
+                                  "Types=image/*\n"
+                                  "Command=viewer %f\n",
+                                  errors);
   g_assert_cmpuint (errors->len, ==, 0);
   g_assert_true (c->show_hidden);
   g_assert_cmpint (c->sort, ==, GBK_SORT_MTIME);
@@ -97,9 +96,9 @@ test_full (void)
   GbkTypeBuilder *b = gbk_type_builder_new ();
   gbk_config_apply_types (c, b);
   g_autoptr (GbkTypeTable) t = gbk_type_builder_finish (b);
-  g_assert_cmpstr (gbk_type_table_mime (t, gbk_type_table_lookup (t, "x.foo", 5,
-                                                                   GBK_KIND_REGULAR, false)),
-                   ==, "application/x-foo");
+  g_assert_cmpstr (
+      gbk_type_table_mime (t, gbk_type_table_lookup (t, "x.foo", 5, GBK_KIND_REGULAR, false)), ==,
+      "application/x-foo");
 }
 
 static void

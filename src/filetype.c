@@ -8,14 +8,14 @@ static const struct
   const char *mime;
   const char *generic_icon;
 } builtins[GBK_TYPE_N_BUILTIN] = {
-  [GBK_TYPE_UNKNOWN]     = { "application/octet-stream", "text-x-generic" },
-  [GBK_TYPE_DIRECTORY]   = { "inode/directory",          "folder" },
-  [GBK_TYPE_EXECUTABLE]  = { "application/x-executable", "application-x-executable" },
-  [GBK_TYPE_BROKEN_LINK] = { "inode/symlink",            "text-x-generic" },
-  [GBK_TYPE_CHARDEV]     = { "inode/chardevice",         "text-x-generic" },
-  [GBK_TYPE_BLOCKDEV]    = { "inode/blockdevice",        "text-x-generic" },
-  [GBK_TYPE_FIFO]        = { "inode/fifo",               "text-x-generic" },
-  [GBK_TYPE_SOCKET]      = { "inode/socket",             "text-x-generic" },
+  [GBK_TYPE_UNKNOWN] = { "application/octet-stream", "text-x-generic" },
+  [GBK_TYPE_DIRECTORY] = { "inode/directory", "folder" },
+  [GBK_TYPE_EXECUTABLE] = { "application/x-executable", "application-x-executable" },
+  [GBK_TYPE_BROKEN_LINK] = { "inode/symlink", "text-x-generic" },
+  [GBK_TYPE_CHARDEV] = { "inode/chardevice", "text-x-generic" },
+  [GBK_TYPE_BLOCKDEV] = { "inode/blockdevice", "text-x-generic" },
+  [GBK_TYPE_FIFO] = { "inode/fifo", "text-x-generic" },
+  [GBK_TYPE_SOCKET] = { "inode/socket", "text-x-generic" },
 };
 
 /* Also used, unfinished, as the builder: GbkTypeBuilder is a thin wrapper so the type system
@@ -166,8 +166,8 @@ valid_mime (const char *mime)
 }
 
 bool
-gbk_type_builder_add (GbkTypeBuilder *b, const char *ext, const char *mime,
-                      int weight, bool case_sensitive)
+gbk_type_builder_add (GbkTypeBuilder *b, const char *ext, const char *mime, int weight,
+                      bool case_sensitive)
 {
   g_assert (b != nullptr && b->t != nullptr);
   GbkTypeTable *t = b->t;
@@ -392,8 +392,8 @@ lookup_ext (const GbkTypeTable *t, const char *ext, size_t len)
 }
 
 GbkTypeId
-gbk_type_table_lookup (const GbkTypeTable *t, const char *name, size_t name_len,
-                       GbkFileKind kind, bool executable)
+gbk_type_table_lookup (const GbkTypeTable *t, const char *name, size_t name_len, GbkFileKind kind,
+                       bool executable)
 {
   g_assert (t != nullptr && t->icons != nullptr);
 

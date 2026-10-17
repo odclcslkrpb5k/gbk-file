@@ -59,7 +59,8 @@ start (GbkOpKind kind, const char *src_rel, const char *dest_rel, Watch *w, GObj
 {
   g_autoptr (GPtrArray) src = g_ptr_array_new_with_free_func (g_free);
   g_ptr_array_add (src, g_build_filename (root, src_rel, nullptr));
-  g_autofree char *dest = dest_rel != nullptr ? g_build_filename (root, dest_rel, nullptr) : nullptr;
+  g_autofree char *dest
+      = dest_rel != nullptr ? g_build_filename (root, dest_rel, nullptr) : nullptr;
   GbkJob *job = gbk_job_new (kind, src, dest);
   w->job = job;
   gbk_connect (owner, job, "question", G_CALLBACK (on_question), w);

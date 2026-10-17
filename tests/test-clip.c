@@ -15,8 +15,8 @@ list (const char *first, ...)
 static void
 test_round_trip (void)
 {
-  g_autoptr (GPtrArray) paths = list ("/home/u/a b.txt", "/home/u/\xff\xfe raw", "/x/%25",
-                                      (const char *) nullptr);
+  g_autoptr (GPtrArray) paths
+      = list ("/home/u/a b.txt", "/home/u/\xff\xfe raw", "/x/%25", (const char *) nullptr);
   for (int cut = 0; cut < 2; cut++)
     {
       g_autofree char *g = gbk_clip_format_gnome (paths, cut);

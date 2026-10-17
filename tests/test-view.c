@@ -65,9 +65,10 @@ setup (Fixture *f, int n_files, int width, int height)
       g_ptr_array_add (s->upserts, mk (name, GBK_KIND_REGULAR));
     }
   g_ptr_array_add (s->upserts, mk ("archive.zip", GBK_KIND_REGULAR));
-  g_ptr_array_add (s->upserts, mk ("zz a very long file name that should be ellipsized in the middle "
-                                   "because it is far too wide for any sensible column.txt",
-                                   GBK_KIND_REGULAR));
+  g_ptr_array_add (s->upserts,
+                   mk ("zz a very long file name that should be ellipsized in the middle "
+                       "because it is far too wide for any sensible column.txt",
+                       GBK_KIND_REGULAR));
   g_ptr_array_add (s->upserts, mk ("ünïcödé näme.txt", GBK_KIND_REGULAR));
   gbk_dir_model_apply_for_test (f->model, s);
 
@@ -121,8 +122,8 @@ send_key (Fixture *f, guint keyval, GdkModifierType state)
   ev->key.window = g_object_ref (gtk_widget_get_window (GTK_WIDGET (f->view)));
   ev->key.keyval = keyval;
   ev->key.state = state;
-  gdk_event_set_device (ev, gdk_seat_get_keyboard (
-      gdk_display_get_default_seat (gtk_widget_get_display (GTK_WIDGET (f->view)))));
+  gdk_event_set_device (ev, gdk_seat_get_keyboard (gdk_display_get_default_seat (
+                                gtk_widget_get_display (GTK_WIDGET (f->view)))));
   bool handled = gtk_widget_event (GTK_WIDGET (f->view), ev);
   gdk_event_free (ev);
   flush ();
@@ -164,8 +165,8 @@ send_click (Fixture *f, size_t index, GdkModifierType state, GdkEventType type, 
   ev->button.y = y;
   ev->button.button = button;
   ev->button.state = state;
-  gdk_event_set_device (ev, gdk_seat_get_pointer (
-      gdk_display_get_default_seat (gtk_widget_get_display (GTK_WIDGET (f->view)))));
+  gdk_event_set_device (ev, gdk_seat_get_pointer (gdk_display_get_default_seat (
+                                gtk_widget_get_display (GTK_WIDGET (f->view)))));
   gtk_widget_event (GTK_WIDGET (f->view), ev);
   gdk_event_free (ev);
   flush ();
@@ -179,8 +180,10 @@ test_layout (Fixture *f, const void *data G_GNUC_UNUSED)
   /* Dirs first, then natural order. */
   g_assert_cmpstr (name_at (f, 0), ==, "Dir A");
   g_assert_cmpstr (name_at (f, 3), ==, "archive.zip");
-  g_assert_cmpuint (gbk_view_item_at (f->view, 5, 2), ==, gbk_dir_model_visible_handle (f->model, 0));
-  g_assert_cmpuint (gbk_view_item_at (f->view, 5, 2 + (double) (rows - 1) * 20), !=, GBK_HANDLE_NONE);
+  g_assert_cmpuint (gbk_view_item_at (f->view, 5, 2), ==,
+                    gbk_dir_model_visible_handle (f->model, 0));
+  g_assert_cmpuint (gbk_view_item_at (f->view, 5, 2 + (double) (rows - 1) * 20), !=,
+                    GBK_HANDLE_NONE);
   g_assert_cmpuint (gbk_view_item_at (f->view, -1, 2), ==, GBK_HANDLE_NONE);
   g_assert_cmpuint (gbk_view_item_at (f->view, 5, 100000), ==, GBK_HANDLE_NONE);
 }
@@ -278,7 +281,6 @@ test_mouse (Fixture *f, const void *data G_GNUC_UNUSED)
   send_click (f, 4, 0, GDK_BUTTON_PRESS, 1);
   send_click (f, 8, GDK_SHIFT_MASK, GDK_BUTTON_PRESS, 1);
   g_assert_cmpuint (gbk_view_n_selected (f->view), ==, 5);
-
 
   /* Right-click on an unselected item selects just it. */
   send_click (f, 1, 0, GDK_BUTTON_PRESS, 3);
@@ -419,8 +421,16 @@ test_many_items_and_screenshot (Fixture *f, const void *data G_GNUC_UNUSED)
 #define ADD(path, fn, n, w, h) \
   g_test_add (path, Fixture, nullptr, setup_##n##_##w##_##h, fn, teardown)
 
-static void setup_30_500_160 (Fixture *f, const void *d G_GNUC_UNUSED) { setup (f, 30, 500, 160); }
-static void setup_200_600_200 (Fixture *f, const void *d G_GNUC_UNUSED) { setup (f, 200, 600, 200); }
+static void
+setup_30_500_160 (Fixture *f, const void *d G_GNUC_UNUSED)
+{
+  setup (f, 30, 500, 160);
+}
+static void
+setup_200_600_200 (Fixture *f, const void *d G_GNUC_UNUSED)
+{
+  setup (f, 200, 600, 200);
+}
 
 int
 main (int argc, char **argv)

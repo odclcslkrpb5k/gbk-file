@@ -86,6 +86,8 @@ check() {
   echo "== desktop entry =="
   sed "s|@BIN@|/usr/bin/quoin|g" data/quoin.desktop.in > out/quoin.desktop
   desktop-file-validate out/quoin.desktop
+  echo "== formatting (clang-format) =="
+  clang-format --dry-run --Werror src/*.c src/*.h tests/*.c tests/fuzz/*.c
   echo "== source rules =="
   python3 tools/check-source.py self-test
   python3 tools/check-source.py

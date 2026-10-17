@@ -58,7 +58,13 @@ struct _GbkJob
 
 G_DEFINE_FINAL_TYPE (GbkJob, gbk_job, G_TYPE_OBJECT)
 
-enum { SIGNAL_PROGRESS, SIGNAL_QUESTION, SIGNAL_FINISHED, N_SIGNALS };
+enum
+{
+  SIGNAL_PROGRESS,
+  SIGNAL_QUESTION,
+  SIGNAL_FINISHED,
+  N_SIGNALS
+};
 static guint signals[N_SIGNALS];
 static int live_jobs;
 
@@ -215,8 +221,8 @@ static void *
 worker (void *data)
 {
   Shared *s = data;
-  GbkOpsHooks hooks = { hook_conflict, hook_error, hook_untrashable, hook_progress,
-                        hook_cancelled, s };
+  GbkOpsHooks hooks
+      = { hook_conflict, hook_error, hook_untrashable, hook_progress, hook_cancelled, s };
   Msg *done = g_new0 (Msg, 1);
   done->type = MSG_FINISHED;
   done->created = g_ptr_array_new_with_free_func (g_free);
@@ -249,21 +255,14 @@ worker (void *data)
       if (gbk_ops_create (s->dest, s->name, s->kind == GBK_JOB_CREATE_FOLDER, &done->error))
         g_ptr_array_add (done->created, g_strdup (s->name));
       break;
-    case GBK_JOB_SET_EXECUTABLE:
-      run_executable (s, true, &done->error);
-      break;
-    case GBK_JOB_CLEAR_EXECUTABLE:
-      run_executable (s, false, &done->error);
-      break;
+    case GBK_JOB_SET_EXECUTABLE: run_executable (s, true, &done->error); break;
+    case GBK_JOB_CLEAR_EXECUTABLE: run_executable (s, false, &done->error); break;
     case GBK_JOB_PERMISSIONS:
       ok = gbk_ops_set_permissions (first, s->rwx, &done->error);
       agree (ok, done->error);
       break;
-    case GBK_JOB_INFO:
-      done->info = gbk_ops_info (first, &done->error);
-      break;
-    default:
-      gbk_fatal ("bad job kind %d", (int) s->kind);
+    case GBK_JOB_INFO: done->info = gbk_ops_info (first, &done->error); break;
+    default: gbk_fatal ("bad job kind %d", (int) s->kind);
     }
   send (s, done);
   shared_unref (s);
@@ -319,8 +318,7 @@ on_wake (int fd G_GNUC_UNUSED, GIOCondition cond G_GNUC_UNUSED, void *data)
             msg_free (m);
             return false;
           }
-        default:
-          gbk_fatal ("bad job message %d", (int) m->type);
+        default: gbk_fatal ("bad job message %d", (int) m->type);
         }
       msg_free (m);
     }
@@ -331,7 +329,7 @@ void
 gbk_job_answer (GbkJob *job, GbkChoice choice, bool apply_all)
 {
   if (!job->waiting)
-    return;              /* stale answer (e.g. dialog closed after cancel) */
+    return; /* stale answer (e.g. dialog closed after cancel) */
   job->waiting = false;
   g_mutex_lock (&job->s->lock);
   job->s->answer = choice;
@@ -346,7 +344,7 @@ gbk_job_cancel (GbkJob *job)
 {
   g_atomic_int_set (&job->s->cancelled, 1);
   g_mutex_lock (&job->s->lock);
-  g_cond_broadcast (&job->s->cond);     /* wake a worker waiting for an answer */
+  g_cond_broadcast (&job->s->cond); /* wake a worker waiting for an answer */
   g_mutex_unlock (&job->s->lock);
 }
 
@@ -355,7 +353,7 @@ gbk_job_start (GbkJob *job)
 {
   g_assert (!job->running && job->watch == 0);
   job->running = true;
-  g_object_ref (job);                   /* released in finish() */
+  g_object_ref (job); /* released in finish() */
   g_atomic_int_inc (&live_jobs);
   job->watch = gbk_fd_watch (G_OBJECT (job), job->s->wake_fd, G_IO_IN, on_wake, job);
   g_atomic_ref_count_inc (&job->s->rc);
@@ -368,7 +366,7 @@ gbk_job_start (GbkJob *job)
       m->type = MSG_FINISHED;
       m->error = g_steal_pointer (&error);
       m->created = g_ptr_array_new_with_free_func (g_free);
-      send (job->s, m);                 /* delivered via the normal path */
+      send (job->s, m); /* delivered via the normal path */
       return;
     }
   g_thread_unref (t);
@@ -390,15 +388,14 @@ static void
 gbk_job_class_init (GbkJobClass *klass)
 {
   G_OBJECT_CLASS (klass)->finalize = gbk_job_finalize;
-  signals[SIGNAL_PROGRESS] = g_signal_new ("progress", G_TYPE_FROM_CLASS (klass),
-                                           G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                           G_TYPE_NONE, 0);
-  signals[SIGNAL_QUESTION] = g_signal_new ("question", G_TYPE_FROM_CLASS (klass),
-                                           G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                           G_TYPE_NONE, 1, G_TYPE_POINTER);
-  signals[SIGNAL_FINISHED] = g_signal_new ("finished", G_TYPE_FROM_CLASS (klass),
-                                           G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                           G_TYPE_NONE, 1, G_TYPE_ERROR);
+  signals[SIGNAL_PROGRESS] = g_signal_new ("progress", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+                                           0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  signals[SIGNAL_QUESTION]
+      = g_signal_new ("question", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr,
+                      nullptr, G_TYPE_NONE, 1, G_TYPE_POINTER);
+  signals[SIGNAL_FINISHED]
+      = g_signal_new ("finished", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr,
+                      nullptr, G_TYPE_NONE, 1, G_TYPE_ERROR);
 }
 
 static void
@@ -436,8 +433,14 @@ gbk_job_new (GbkOpKind kind, GPtrArray *sources, const char *dest_dir)
     {
     case GBK_OP_COPY: k = GBK_JOB_COPY; break;
     case GBK_OP_MOVE: k = GBK_JOB_MOVE; break;
-    case GBK_OP_TRASH: k = GBK_JOB_TRASH; dest_dir = nullptr; break;
-    case GBK_OP_DELETE: k = GBK_JOB_DELETE; dest_dir = nullptr; break;
+    case GBK_OP_TRASH:
+      k = GBK_JOB_TRASH;
+      dest_dir = nullptr;
+      break;
+    case GBK_OP_DELETE:
+      k = GBK_JOB_DELETE;
+      dest_dir = nullptr;
+      break;
     default: gbk_fatal ("bad operation %d", (int) kind);
     }
   return job_new (k, sources, dest_dir);
@@ -491,13 +494,41 @@ gbk_job_new_info (const char *path)
   return job_new_one (GBK_JOB_INFO, path, nullptr);
 }
 
-bool gbk_job_running (const GbkJob *job) { return job->running; }
-GbkJobKind gbk_job_kind (GbkJob *job) { return job->s->kind; }
-const GbkFileInfo *gbk_job_info (const GbkJob *job) { return job->info; }
-const char *gbk_job_dest (GbkJob *job) { return job->s->dest; }
-size_t gbk_job_n_sources (GbkJob *job) { return job->s->sources->len; }
-const char *gbk_job_current (GbkJob *job) { return job->current != nullptr ? job->current : ""; }
-GPtrArray *gbk_job_created (const GbkJob *job) { return job->created; }
+bool
+gbk_job_running (const GbkJob *job)
+{
+  return job->running;
+}
+GbkJobKind
+gbk_job_kind (GbkJob *job)
+{
+  return job->s->kind;
+}
+const GbkFileInfo *
+gbk_job_info (const GbkJob *job)
+{
+  return job->info;
+}
+const char *
+gbk_job_dest (GbkJob *job)
+{
+  return job->s->dest;
+}
+size_t
+gbk_job_n_sources (GbkJob *job)
+{
+  return job->s->sources->len;
+}
+const char *
+gbk_job_current (GbkJob *job)
+{
+  return job->current != nullptr ? job->current : "";
+}
+GPtrArray *
+gbk_job_created (const GbkJob *job)
+{
+  return job->created;
+}
 
 double
 gbk_job_fraction (const GbkJob *job)

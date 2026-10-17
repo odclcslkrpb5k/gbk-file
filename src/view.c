@@ -54,7 +54,7 @@ struct _GbkView
   size_t rows;
   GArray *col_x;                /* int: start x of each column, plus the total at the end */
   GArray *widths;               /* WidthCache, indexed by model slot: valid for `model` only
-                                 * (slots and generations restart in every model) */
+                   * (slots and generations restart in every model) */
 
   /* Selection. */
   GHashTable *selected;         /* GbkHandle set */
@@ -381,8 +381,8 @@ icon_for (GbkView *v, GbkTypeId type)
       theme, names, ICON_SIZE, scale, GTK_ICON_LOOKUP_FORCE_SIZE);
   if (info == nullptr)
     return nullptr;
-  cairo_surface_t *surface = gtk_icon_info_load_surface (
-      info, gtk_widget_get_window (GTK_WIDGET (v)), nullptr);
+  cairo_surface_t *surface
+      = gtk_icon_info_load_surface (info, gtk_widget_get_window (GTK_WIDGET (v)), nullptr);
   g_ptr_array_index (v->icons, type) = surface;
   return surface;
 }
@@ -576,7 +576,9 @@ gbk_view_move_cursor (GbkView *v, GbkMoveStep step, int count, GbkSelectMode mod
     switch (step)
       {
       case GBK_MOVE_ITEM: target = step_index (cur, count, n); break;
-      case GBK_MOVE_COLUMN: target = step_index (cur, (int64_t) count * (int64_t) v->rows, n); break;
+      case GBK_MOVE_COLUMN:
+        target = step_index (cur, (int64_t) count * (int64_t) v->rows, n);
+        break;
       case GBK_MOVE_PAGE:
         target = step_index (cur, (int64_t) count * (int64_t) (v->rows * columns_per_page (v)), n);
         break;
@@ -603,10 +605,8 @@ gbk_view_move_cursor (GbkView *v, GbkMoveStep step, int count, GbkSelectMode mod
         select_range (v, a, target);
         break;
       }
-    case GBK_SELECT_NONE:
-      break;
-    default:
-      gbk_fatal ("bad select mode %d", (int) mode);
+    case GBK_SELECT_NONE: break;
+    default: gbk_fatal ("bad select mode %d", (int) mode);
     }
   set_cursor (v, h);
   scroll_to_index (v, target);
@@ -717,8 +717,8 @@ gbk_view_set_model (GbkView *v, GbkDirModel *model)
   if (model != nullptr)
     {
       v->model = g_object_ref (model);
-      v->model_changed_id = gbk_connect (G_OBJECT (v), model, "changed",
-                                         G_CALLBACK (on_model_changed), v);
+      v->model_changed_id
+          = gbk_connect (G_OBJECT (v), model, "changed", G_CALLBACK (on_model_changed), v);
     }
   relayout (v);
   gtk_widget_queue_draw (GTK_WIDGET (v));
@@ -930,7 +930,8 @@ gbk_view_button_release (GtkWidget *w, GdkEventButton *ev)
   if (ev->button != GDK_BUTTON_PRIMARY)
     return false;
   /* A plain click on a selected item (no drag happened): select just it. */
-  if (v->press_pending && v->model != nullptr && gbk_dir_model_get (v->model, v->press_item) != nullptr)
+  if (v->press_pending && v->model != nullptr
+      && gbk_dir_model_get (v->model, v->press_item) != nullptr)
     gbk_view_select_only (v, v->press_item);
   v->press_pending = false;
   v->press_armed = false;
@@ -1042,7 +1043,8 @@ autoscroll_tick (void *data)
       v->autoscroll = 0;
       return false;
     }
-  gtk_adjustment_set_value (v->hadj, gtk_adjustment_get_value (v->hadj) + v->scroll_dir * DND_SCROLL_PX);
+  gtk_adjustment_set_value (v->hadj,
+                            gtk_adjustment_get_value (v->hadj) + v->scroll_dir * DND_SCROLL_PX);
   return true;
 }
 
@@ -1134,22 +1136,46 @@ gbk_view_key_press (GtkWidget *w, GdkEventKey *ev)
 
   switch (ev->keyval)
     {
-    case GDK_KEY_Up: case GDK_KEY_KP_Up:
-      search_clear (v); gbk_view_move_cursor (v, GBK_MOVE_ITEM, -1, mode); return true;
-    case GDK_KEY_Down: case GDK_KEY_KP_Down:
-      search_clear (v); gbk_view_move_cursor (v, GBK_MOVE_ITEM, 1, mode); return true;
-    case GDK_KEY_Left: case GDK_KEY_KP_Left:
-      search_clear (v); gbk_view_move_cursor (v, GBK_MOVE_COLUMN, -1, mode); return true;
-    case GDK_KEY_Right: case GDK_KEY_KP_Right:
-      search_clear (v); gbk_view_move_cursor (v, GBK_MOVE_COLUMN, 1, mode); return true;
-    case GDK_KEY_Page_Up: case GDK_KEY_KP_Page_Up:
-      search_clear (v); gbk_view_move_cursor (v, GBK_MOVE_PAGE, -1, mode); return true;
-    case GDK_KEY_Page_Down: case GDK_KEY_KP_Page_Down:
-      search_clear (v); gbk_view_move_cursor (v, GBK_MOVE_PAGE, 1, mode); return true;
-    case GDK_KEY_Home: case GDK_KEY_KP_Home:
-      search_clear (v); gbk_view_move_cursor (v, GBK_MOVE_ENDS, -1, mode); return true;
-    case GDK_KEY_End: case GDK_KEY_KP_End:
-      search_clear (v); gbk_view_move_cursor (v, GBK_MOVE_ENDS, 1, mode); return true;
+    case GDK_KEY_Up:
+    case GDK_KEY_KP_Up:
+      search_clear (v);
+      gbk_view_move_cursor (v, GBK_MOVE_ITEM, -1, mode);
+      return true;
+    case GDK_KEY_Down:
+    case GDK_KEY_KP_Down:
+      search_clear (v);
+      gbk_view_move_cursor (v, GBK_MOVE_ITEM, 1, mode);
+      return true;
+    case GDK_KEY_Left:
+    case GDK_KEY_KP_Left:
+      search_clear (v);
+      gbk_view_move_cursor (v, GBK_MOVE_COLUMN, -1, mode);
+      return true;
+    case GDK_KEY_Right:
+    case GDK_KEY_KP_Right:
+      search_clear (v);
+      gbk_view_move_cursor (v, GBK_MOVE_COLUMN, 1, mode);
+      return true;
+    case GDK_KEY_Page_Up:
+    case GDK_KEY_KP_Page_Up:
+      search_clear (v);
+      gbk_view_move_cursor (v, GBK_MOVE_PAGE, -1, mode);
+      return true;
+    case GDK_KEY_Page_Down:
+    case GDK_KEY_KP_Page_Down:
+      search_clear (v);
+      gbk_view_move_cursor (v, GBK_MOVE_PAGE, 1, mode);
+      return true;
+    case GDK_KEY_Home:
+    case GDK_KEY_KP_Home:
+      search_clear (v);
+      gbk_view_move_cursor (v, GBK_MOVE_ENDS, -1, mode);
+      return true;
+    case GDK_KEY_End:
+    case GDK_KEY_KP_End:
+      search_clear (v);
+      gbk_view_move_cursor (v, GBK_MOVE_ENDS, 1, mode);
+      return true;
 
     case GDK_KEY_space:
       if (v->search->len > 0 && !ctrl)
@@ -1158,7 +1184,9 @@ gbk_view_key_press (GtkWidget *w, GdkEventKey *ev)
         gbk_view_toggle_cursor (v);
       return true;
 
-    case GDK_KEY_Return: case GDK_KEY_KP_Enter: case GDK_KEY_ISO_Enter:
+    case GDK_KEY_Return:
+    case GDK_KEY_KP_Enter:
+    case GDK_KEY_ISO_Enter:
       search_clear (v);
       if (gbk_view_n_selected (v) == 0 && index_of (v, v->cursor) != SIZE_MAX)
         gbk_view_select_only (v, v->cursor);
@@ -1196,8 +1224,7 @@ gbk_view_key_press (GtkWidget *w, GdkEventKey *ev)
       }
       return true;
 
-    default:
-      break;
+    default: break;
     }
 
   if (ctrl && (ev->keyval == GDK_KEY_a || ev->keyval == GDK_KEY_A))
@@ -1229,8 +1256,10 @@ gbk_view_scroll (GtkWidget *w, GdkEventScroll *ev)
   double delta = 0;
   switch (ev->direction)
     {
-    case GDK_SCROLL_UP: case GDK_SCROLL_LEFT: delta = -1; break;
-    case GDK_SCROLL_DOWN: case GDK_SCROLL_RIGHT: delta = 1; break;
+    case GDK_SCROLL_UP:
+    case GDK_SCROLL_LEFT: delta = -1; break;
+    case GDK_SCROLL_DOWN:
+    case GDK_SCROLL_RIGHT: delta = 1; break;
     case GDK_SCROLL_SMOOTH:
       delta = fabs (ev->delta_x) > fabs (ev->delta_y) ? ev->delta_x : ev->delta_y;
       break;
@@ -1258,14 +1287,16 @@ gbk_view_realize (GtkWidget *w)
   gtk_widget_set_realized (w, true);
 
   GdkWindowAttr attrs = {
-    .x = a.x, .y = a.y, .width = a.width, .height = a.height,
+    .x = a.x,
+    .y = a.y,
+    .width = a.width,
+    .height = a.height,
     .window_type = GDK_WINDOW_CHILD,
     .wclass = GDK_INPUT_OUTPUT,
     .visual = gtk_widget_get_visual (w),
     .event_mask = gtk_widget_get_events (w) | GDK_EXPOSURE_MASK | GDK_BUTTON_PRESS_MASK
                   | GDK_BUTTON_RELEASE_MASK | GDK_BUTTON1_MOTION_MASK | GDK_KEY_PRESS_MASK
-                  | GDK_SCROLL_MASK
-                  | GDK_SMOOTH_SCROLL_MASK | GDK_FOCUS_CHANGE_MASK,
+                  | GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_FOCUS_CHANGE_MASK,
   };
   GdkWindow *win = gdk_window_new (gtk_widget_get_parent_window (w), &attrs,
                                    GDK_WA_X | GDK_WA_Y | GDK_WA_VISUAL);
@@ -1329,8 +1360,8 @@ set_hadjustment (GbkView *v, GtkAdjustment *adj)
   if (adj == nullptr)
     adj = gtk_adjustment_new (0, 0, 0, 0, 0, 0);
   v->hadj = g_object_ref_sink (adj);
-  v->hadj_changed_id = gbk_connect (G_OBJECT (v), adj, "value-changed",
-                                    G_CALLBACK (on_hadj_changed), v);
+  v->hadj_changed_id
+      = gbk_connect (G_OBJECT (v), adj, "value-changed", G_CALLBACK (on_hadj_changed), v);
   update_adjustment (v);
 }
 
@@ -1447,19 +1478,17 @@ gbk_view_class_init (GbkViewClass *klass)
   g_object_class_override_property (oc, PROP_HSCROLL_POLICY, "hscroll-policy");
   g_object_class_override_property (oc, PROP_VSCROLL_POLICY, "vscroll-policy");
 
-  signals[SIGNAL_ACTIVATE] = g_signal_new ("activate", G_TYPE_FROM_CLASS (klass),
-                                           G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                           G_TYPE_NONE, 0);
-  signals[SIGNAL_SELECTION_CHANGED] = g_signal_new ("selection-changed", G_TYPE_FROM_CLASS (klass),
-                                                    G_SIGNAL_RUN_LAST, 0, nullptr, nullptr,
-                                                    nullptr, G_TYPE_NONE, 0);
-  signals[SIGNAL_CONTEXT_MENU] = g_signal_new ("context-menu", G_TYPE_FROM_CLASS (klass),
-                                               G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                               G_TYPE_NONE, 1,
-                                               GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
-  signals[SIGNAL_SEARCH_CHANGED] = g_signal_new ("search-changed", G_TYPE_FROM_CLASS (klass),
-                                                 G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
-                                                 G_TYPE_NONE, 0);
+  signals[SIGNAL_ACTIVATE] = g_signal_new ("activate", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+                                           0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  signals[SIGNAL_SELECTION_CHANGED]
+      = g_signal_new ("selection-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr,
+                      nullptr, nullptr, G_TYPE_NONE, 0);
+  signals[SIGNAL_CONTEXT_MENU] = g_signal_new (
+      "context-menu", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
+      G_TYPE_NONE, 1, GDK_TYPE_EVENT | G_SIGNAL_TYPE_STATIC_SCOPE);
+  signals[SIGNAL_SEARCH_CHANGED]
+      = g_signal_new ("search-changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr,
+                      nullptr, nullptr, G_TYPE_NONE, 0);
 
   signals[SIGNAL_DROP] = g_signal_new ("drop", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
                                        nullptr, nullptr, nullptr, G_TYPE_NONE, 3, G_TYPE_POINTER,
@@ -1474,8 +1503,7 @@ gbk_view_init (GbkView *v)
 {
   gtk_widget_set_has_window (GTK_WIDGET (v), true);
   gtk_widget_set_can_focus (GTK_WIDGET (v), true);
-  gtk_style_context_add_class (gtk_widget_get_style_context (GTK_WIDGET (v)),
-                               GTK_STYLE_CLASS_VIEW);
+  gtk_style_context_add_class (gtk_widget_get_style_context (GTK_WIDGET (v)), GTK_STYLE_CLASS_VIEW);
   v->col_x = g_array_new (false, true, sizeof (int));
   v->widths = g_array_new (false, true, sizeof (WidthCache));
   v->selected = g_hash_table_new (g_direct_hash, g_direct_equal);

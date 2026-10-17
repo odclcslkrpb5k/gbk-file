@@ -1,28 +1,28 @@
 #include "filetype.h"
 
-static const char fixture[] =
-  "# comment\n"
-  "50:application/gzip:*.gz\n"
-  "50:application/x-compressed-tar:*.tar.gz\n"
-  "50:application/zip:*.zip\n"
-  "50:text/x-csrc:*.c:cs\n"
-  "50:text/x-c++src:*.C:cs\n"
-  "50:text/x-chdr:*.h\n"
-  "50:video/mp2t:*.ts\n"
-  "50:text/vnd.trolltech.linguist:*.ts\n"   /* same weight, later: loses */
-  "40:text/plain:*.txt\n"
-  "60:text/x-readme:*.txt\n"                /* higher weight: wins */
-  "50:text/x-makefile:makefile\n"           /* literal name: ignored */
-  "60:application/x-sharedlib:*.so.[0-9]*\n" /* complex glob: ignored */
-  "50:application/x-trash:*~\n"             /* not an extension: ignored */
-  "50:application/x-shellscript:*.sh\n"
-  "50:application/x-appimage:*.AppImage\n"
-  "garbage line\n"
-  "x:text/plain:*.bad\n"                    /* bad weight */
-  "50:notamime:*.bad\n"                     /* bad mime */
-  "50:text/plain:*.b/d\n"                   /* bad ext */
-  "50:text/plain:*.\n"                      /* empty ext */
-  "50:text/plain:*.last";                   /* no trailing newline */
+static const char fixture[]
+    = "# comment\n"
+      "50:application/gzip:*.gz\n"
+      "50:application/x-compressed-tar:*.tar.gz\n"
+      "50:application/zip:*.zip\n"
+      "50:text/x-csrc:*.c:cs\n"
+      "50:text/x-c++src:*.C:cs\n"
+      "50:text/x-chdr:*.h\n"
+      "50:video/mp2t:*.ts\n"
+      "50:text/vnd.trolltech.linguist:*.ts\n"   /* same weight, later: loses */
+      "40:text/plain:*.txt\n"
+      "60:text/x-readme:*.txt\n"                /* higher weight: wins */
+      "50:text/x-makefile:makefile\n"           /* literal name: ignored */
+      "60:application/x-sharedlib:*.so.[0-9]*\n" /* complex glob: ignored */
+      "50:application/x-trash:*~\n"             /* not an extension: ignored */
+      "50:application/x-shellscript:*.sh\n"
+      "50:application/x-appimage:*.AppImage\n"
+      "garbage line\n"
+      "x:text/plain:*.bad\n"                    /* bad weight */
+      "50:notamime:*.bad\n"                     /* bad mime */
+      "50:text/plain:*.b/d\n"                   /* bad ext */
+      "50:text/plain:*.\n"                      /* empty ext */
+      "50:text/plain:*.last";                   /* no trailing newline */
 
 static GbkTypeTable *
 fixture_table (void)
@@ -119,11 +119,11 @@ test_non_utf8_names (void)
   g_autoptr (GbkTypeTable) t = fixture_table ();
   const char name[] = "\xff\xfe\x80.zip";
   g_assert_cmpstr (gbk_type_table_mime (t, gbk_type_table_lookup (t, name, sizeof name - 1,
-                                                                   GBK_KIND_REGULAR, false)),
+                                                                  GBK_KIND_REGULAR, false)),
                    ==, "application/zip");
   const char bad_ext[] = "a.\xff\xfe";
   g_assert_cmpstr (gbk_type_table_mime (t, gbk_type_table_lookup (t, bad_ext, sizeof bad_ext - 1,
-                                                                   GBK_KIND_REGULAR, false)),
+                                                                  GBK_KIND_REGULAR, false)),
                    ==, "application/octet-stream");
 }
 

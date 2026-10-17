@@ -32,8 +32,9 @@ verb (GbkJob *job)
     case GBK_JOB_RENAME: return "Renaming";
     case GBK_JOB_CREATE_FILE: return "Creating File";
     case GBK_JOB_CREATE_FOLDER: return "Creating Folder";
-    case GBK_JOB_SET_EXECUTABLE: case GBK_JOB_CLEAR_EXECUTABLE: case GBK_JOB_PERMISSIONS:
-      return "Changing Permissions";
+    case GBK_JOB_SET_EXECUTABLE:
+    case GBK_JOB_CLEAR_EXECUTABLE:
+    case GBK_JOB_PERMISSIONS: return "Changing Permissions";
     case GBK_JOB_INFO: return "Reading Details";
     default: return "Working";
     }
@@ -48,8 +49,8 @@ on_error_response (GtkDialog *d, int response G_GNUC_UNUSED, void *data G_GNUC_U
 void
 gbk_jobui_error (GtkWindow *parent, const char *title, const char *message)
 {
-  GtkWidget *d = gtk_message_dialog_new (parent, GTK_DIALOG_DESTROY_WITH_PARENT,
-                                         GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", title);
+  GtkWidget *d = gtk_message_dialog_new (parent, GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR,
+                                         GTK_BUTTONS_CLOSE, "%s", title);
   gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (d), "%s", message);
   gbk_connect (G_OBJECT (d), d, "response", G_CALLBACK (on_error_response), nullptr);
   gtk_widget_show (d);
@@ -104,7 +105,13 @@ on_finished (GbkJob *job G_GNUC_UNUSED, GError *error, Ui *ui)
 
 /* ---- questions ---- */
 
-enum { RESP_REPLACE = 1, RESP_SKIP, RESP_KEEP_BOTH, RESP_DELETE };
+enum
+{
+  RESP_REPLACE = 1,
+  RESP_SKIP,
+  RESP_KEEP_BOTH,
+  RESP_DELETE
+};
 
 static void
 on_question_response (GtkDialog *d, int response, GbkJob *job)
@@ -113,7 +120,8 @@ on_question_response (GtkDialog *d, int response, GbkJob *job)
   bool apply_all = all != nullptr && gtk_toggle_button_get_active (all);
   switch (response)
     {
-    case RESP_REPLACE: case RESP_DELETE: gbk_job_answer (job, GBK_CHOICE_REPLACE, apply_all); break;
+    case RESP_REPLACE:
+    case RESP_DELETE: gbk_job_answer (job, GBK_CHOICE_REPLACE, apply_all); break;
     case RESP_SKIP: gbk_job_answer (job, GBK_CHOICE_SKIP, apply_all); break;
     case RESP_KEEP_BOTH: gbk_job_answer (job, GBK_CHOICE_KEEP_BOTH, apply_all); break;
     default: gbk_job_cancel (job); break;        /* Cancel, Escape, or window closed */
@@ -169,8 +177,7 @@ on_question (GbkJob *job, GbkQuestion *q, Ui *ui)
                               "_Delete Permanently", RESP_DELETE, nullptr);
       gtk_dialog_set_default_response (GTK_DIALOG (d), RESP_SKIP);
       break;
-    default:
-      gbk_fatal ("bad question kind %d", (int) q->kind);
+    default: gbk_fatal ("bad question kind %d", (int) q->kind);
     }
   g_object_set_data_full (G_OBJECT (d), KEY_JOB, g_object_ref (job), g_object_unref);
   gbk_connect (G_OBJECT (d), d, "response", G_CALLBACK (on_question_response), job);

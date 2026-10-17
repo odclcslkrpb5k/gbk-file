@@ -56,7 +56,7 @@ typedef struct
  * go through hooks->error. `created` (may be nullptr) receives the basenames created in
  * dest_dir (char*, owned) so the caller can select them. */
 [[nodiscard]] bool gbk_ops_run (GbkOpKind kind, GPtrArray *sources, const char *dest_dir,
-                  const GbkOpsHooks *hooks, GPtrArray *created, GError **error);
+                                const GbkOpsHooks *hooks, GPtrArray *created, GError **error);
 
 /* Rename `path` to `new_name` in the same directory. Fails (G_IO_ERROR_EXISTS) rather than
  * replace an existing file. */

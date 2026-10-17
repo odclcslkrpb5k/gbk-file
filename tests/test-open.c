@@ -166,9 +166,8 @@ main (int argc, char **argv)
   g_setenv ("XDG_CONFIG_HOME", conf_home, true);
 
   g_test_init (&argc, &argv, nullptr);
-  const char conf[] =
-    "[General]\nTerminalRun=env %c\n"
-    "[Action touch]\nName=Touch\nTypes=*\nCommand=touch %F\n";
+  const char conf[] = "[General]\nTerminalRun=env %c\n"
+                      "[Action touch]\nName=Touch\nTypes=*\nCommand=touch %F\n";
   g_autoptr (GPtrArray) errors = g_ptr_array_new_with_free_func (g_free);
   config = gbk_config_load_data (conf, strlen (conf), errors);
   g_assert_cmpuint (errors->len, ==, 0);

@@ -7,4 +7,5 @@
 [[nodiscard]] bool gbk_launch_argv (char **argv, const char *cwd, GError **error);
 
 /* Expand `cmd` and spawn it once (or once per file for %f commands). */
-[[nodiscard]] bool gbk_launch_command (const GbkCommand *cmd, const GbkCommandArgs *args, GError **error);
+[[nodiscard]] bool gbk_launch_command (const GbkCommand *cmd, const GbkCommandArgs *args,
+                                       GError **error);

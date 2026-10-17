@@ -13,20 +13,20 @@ typedef struct
 {
   char *id;             /* from [Action <id>] */
   char *name;           /* menu label */
-  char **types;         /* MIME patterns (e.g. image/png, image/<any>, or a lone star); may be empty */
-  bool directories;     /* also offered for folders */
-  GbkCommand *command;  /* placeholders: d f F */
+  char **types; /* MIME patterns (e.g. image/png, image/<any>, or a lone star); may be empty */
+  bool directories; /* also offered for folders */
+  GbkCommand *command; /* placeholders: d f F */
 } GbkAction;
 
 typedef struct
 {
-  GbkCommand *terminal;       /* F4: open a terminal here. Placeholders: d */
-  GbkCommand *terminal_run;   /* run something in a terminal. Placeholders: d c */
+  GbkCommand *terminal; /* F4: open a terminal here. Placeholders: d */
+  GbkCommand *terminal_run; /* run something in a terminal. Placeholders: d c */
   bool show_hidden;
   GbkSortMode sort;
-  GHashTable *interpreters;   /* lowercased ext -> char** argv prefix; marks scripts */
-  GPtrArray *type_overrides;  /* char* pairs: ext, mime, ext, mime, ... */
-  GPtrArray *actions;         /* GbkAction*, in file order */
+  GHashTable *interpreters; /* lowercased ext -> char** argv prefix; marks scripts */
+  GPtrArray *type_overrides; /* char* pairs: ext, mime, ext, mime, ... */
+  GPtrArray *actions; /* GbkAction*, in file order */
 } GbkConfig;
 
 /* Built-in defaults. */
@@ -42,7 +42,7 @@ typedef struct
 /* $XDG_CONFIG_HOME/quoin/quoin.conf. If only the file from before the rename exists
  * (gbk-file/gbk-file.conf), it's moved there first; if that fails, its path is returned. */
 char *gbk_config_default_path (void);
-char *gbk_config_path_in (const char *config_home);   /* the same, under `config_home` */
+char *gbk_config_path_in (const char *config_home); /* the same, under `config_home` */
 
 void gbk_config_free (GbkConfig *c);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (GbkConfig, gbk_config_free)

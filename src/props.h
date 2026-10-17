@@ -14,7 +14,8 @@ GbkProps *gbk_props_new (GtkWindow *parent, const char *path, const char *mime);
 
 /* For tests. */
 bool gbk_props_loaded (const GbkProps *p);                          /* details are on screen */
-const char *gbk_props_value (GbkProps *p, const char *field); /* "Modified" etc.; nullptr if absent */
+const char *gbk_props_value (GbkProps *p,
+                             const char *field); /* "Modified" etc.; nullptr if absent */
 /* who: 0 owner, 1 group, 2 others; what: 0 read, 1 write, 2 execute. */
 GtkToggleButton *gbk_props_permission (GbkProps *p, int who, int what);
 GtkButton *gbk_props_apply_button (GbkProps *p);

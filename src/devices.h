@@ -37,12 +37,12 @@ typedef void (*GbkDeviceDone) (GObject *owner, const char *path, const GError *e
  * Open mounts the device first if it isn't mounted. Unmount and eject first emit
  * "pre-unmount" for every mount that will go, then wait (up to GBK_DEVICES_RELEASE_MS) for
  * our own folder readers there to finish, so we never make the device busy ourselves. */
-bool gbk_devices_open (GbkDevices *d, const char *id, GMountOperation *op,
-                       GObject *owner, GbkDeviceDone done);
-bool gbk_devices_unmount (GbkDevices *d, const char *id, GMountOperation *op,
-                          GObject *owner, GbkDeviceDone done);
-bool gbk_devices_eject (GbkDevices *d, const char *id, GMountOperation *op,
-                        GObject *owner, GbkDeviceDone done);
+bool gbk_devices_open (GbkDevices *d, const char *id, GMountOperation *op, GObject *owner,
+                       GbkDeviceDone done);
+bool gbk_devices_unmount (GbkDevices *d, const char *id, GMountOperation *op, GObject *owner,
+                          GbkDeviceDone done);
+bool gbk_devices_eject (GbkDevices *d, const char *id, GMountOperation *op, GObject *owner,
+                        GbkDeviceDone done);
 
 #define GBK_DEVICES_RELEASE_MS 2000
 

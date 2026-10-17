@@ -26,7 +26,7 @@ GtkButton *gbk_window_sort_button (const GbkWindow *w);
 GtkWidget *gbk_window_status_bar (const GbkWindow *w);
 GtkToggleButton *gbk_window_hidden_button (const GbkWindow *w);
 int gbk_window_n_tabs (GbkWindow *w);
-const char *gbk_window_tab_path (GbkWindow *w, int i);   /* tab `i`'s folder */
+const char *gbk_window_tab_path (GbkWindow *w, int i); /* tab `i`'s folder */
 GbkPathbar *gbk_window_pathbar (GbkWindow *w);
 /* The ☰ menu's Devices list. It starts following the system this long after the window
  * opens (the first folder comes first). */
