@@ -207,7 +207,7 @@ full_scan (GbkScanner *s, int dirfd, bool live)
             {
               /* Mid-listing failure (e.g. EIO). Send what we have as a complete snapshot
                * rather than nothing; a later event or rescan can fill the rest. */
-              g_warning ("readdir %s: %s", s->path, g_strerror (errno));
+              g_warning ("readdir: %s", g_strerror (errno));
             }
           break;
         }

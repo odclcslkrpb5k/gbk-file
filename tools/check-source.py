@@ -16,6 +16,18 @@ Rules:
               and no (void) or (void) ! cast on a call, which silences [[nodiscard]] and
               warn_unused_result. Exceptions are listed in VOID_CASTS below, per file, with
               their exact count and their reason, so one can't be added in passing.
+  logpath     a log or abort message (g_debug ... g_critical, g_log, gbk_fatal) carries no
+              path, folder, URI or display name: users paste logs into public bug
+              reports, and a path holds their user name (DP-3). Matched by the argument's
+              name (path, dir, uri, filename, display, dest, src, root, location). src/
+              only: the tests' messages name their own temporary folders.
+  message     no branching on an error's message text (ER-8): ->message is not an
+              argument of a comparison or search (g_str_equal, strcmp, g_str_has_prefix,
+              strstr, g_strstr_len, g_regex_match_simple, ...). Branch on domain and code.
+  hidden      no literal hidden characters (no-break and zero-width spaces, bidirectional
+              controls, line and paragraph separators) in source: write them as escapes
+              (CD-7). GCC rejects the bidirectional ones itself; this covers the rest, in
+              every file the compiler doesn't read too (meson.build, scripts).
   unsequenced one argument of a call hands &x to a nested call while another argument reads
               x: the order the arguments are evaluated in is unspecified, so x may be read
               before the nested call has written it. No compiler warning or analyzer here
@@ -27,6 +39,7 @@ That gap is what the self-test's examples pin down.
 """
 
 import glob
+import os
 import re
 import subprocess
 import sys
@@ -189,7 +202,56 @@ def suppression(path, text):
     return problems
 
 
-RULES = [nodiscard, unsequenced, discarded, suppression]
+LOG_CALL = re.compile(r"\b(g_debug|g_info|g_message|g_warning|g_critical|g_log|gbk_fatal)\s*\(")
+PATHY = re.compile(r"(?<![A-Za-z_0-9])(?:[A-Za-z_0-9]+(?:->|\.))*"
+                   r"(path|dir|uri|filename|display|dest|src|root|location)\b")
+
+
+def logpath(path, text):
+    problems = []
+    if not path.startswith("src/"):
+        return problems                # tests log their own temporary folders
+    code = STRING.sub('""', COMMENT.sub(" ", text))
+    for m in LOG_CALL.finditer(code):
+        parsed = top_level_args(code, m.end() - 1)
+        if parsed is None:
+            continue
+        for arg in parsed[0][1:]:
+            hit = PATHY.search(arg)
+            if hit:
+                line = code.count("\n", 0, m.start()) + 1
+                problems.append(f"{path}:{line}: {m.group(1)} logs {hit.group(0)}: logs name "
+                                "kinds and codes, never paths (they hold the user's name)")
+    return problems
+
+
+COMPARE_CALL = re.compile(r"\b(g_str_equal|strcmp|strncmp|g_strcmp0|g_str_has_prefix|"
+                          r"g_str_has_suffix|strstr|g_strstr_len|g_strrstr|strcasecmp|"
+                          r"g_ascii_strcasecmp|g_regex_match_simple|g_pattern_match_simple)\s*\(")
+
+
+def message(path, text):
+    problems = []
+    code = COMMENT.sub(" ", text)
+    for m in COMPARE_CALL.finditer(code):
+        parsed = top_level_args(code, m.end() - 1)
+        if parsed is not None and any("->message" in a for a in parsed[0]):
+            line = code.count("\n", 0, m.start()) + 1
+            problems.append(f"{path}:{line}: {m.group(1)} on an error's message: branch on "
+                            "its domain and code (g_error_matches)")
+    return problems
+
+
+HIDDEN = re.compile("[\u00a0\u00ad\u180e\u2000-\u200f\u2028-\u202f\u205f-\u206f\ufeff]")
+
+
+def hidden(path, text):
+    return [f"{path}:{text.count(chr(10), 0, m.start()) + 1}: hidden character "
+            f"U+{ord(m.group(0)):04X}: write it as an escape"
+            for m in HIDDEN.finditer(text)]
+
+
+RULES = [nodiscard, unsequenced, discarded, suppression, logpath, message, hidden]
 # Declarations of GLib's own functions, for the analyzer: not ours to mark.
 EXEMPT = {"src/analyzer-glib.h"}
 
@@ -198,6 +260,8 @@ def check():
     GERROR_TABLE.update(prototypes())
     problems = []
     files = sorted(glob.glob("src/*.[ch]") + glob.glob("tests/*.[ch]") + glob.glob("tests/*/*.[ch]"))
+    other = sorted(glob.glob("meson.build") + glob.glob("*/meson.build") + glob.glob("tools/*")
+                   + ["build", "install.sh", "Dockerfile", "compose.yaml", ".clang-tidy"])
     if len(files) < 20:
         sys.exit(f"check-source: found only {len(files)} files; run from the repository root")
     for path in files:
@@ -206,6 +270,8 @@ def check():
         text = open(path, encoding="utf-8").read()
         for rule in RULES:
             problems += rule(path, text)
+    for path in (p for p in other if os.path.isfile(p)):
+        problems += hidden(path, open(path, encoding="utf-8").read())
     for p in problems:
         print("  " + p)
     if problems:
@@ -253,6 +319,20 @@ EXAMPLES = [
     (suppression, "x.c", "  (void) 0;\n  (void) unused_param;", 0),
     (suppression, "x.c", "  x = (void *) f (y);", 0),
     (suppression, "x.c", "  /* (void) f (); */", 0),
+    (logpath, "src/x.c", "g_warning (\"readdir %s: %s\", s->path, g_strerror (errno));", 1),
+    (logpath, "src/x.c", "gbk_fatal (\"no button for %s\", dir);", 1),
+    (logpath, "src/x.c", "g_debug (\"opened %s\", it->display);", 1),
+    (logpath, "src/x.c", "g_warning (\"readdir: %s\", g_strerror (errno));", 0),
+    (logpath, "src/x.c", "gbk_fatal (\"bad kind %d\", (int) kind);", 0),
+    (logpath, "src/x.c", "g_warning (\"no path here\");", 0),
+    (logpath, "tests/x.c", "gbk_fatal (\"opendir %s\", dir);", 0),
+    (message, "x.c", "if (g_str_has_prefix (error->message, \"No such\"))", 1),
+    (message, "x.c", "if (strcmp (e->message, m) == 0)", 1),
+    (message, "x.c", "if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))", 0),
+    (message, "x.c", "label = g_strdup (error->message);", 0),
+    (hidden, "x.c", "const char *s = \"a\u00a0b\";", 1),
+    (hidden, "x.c", "/* a\u200bb */", 1),
+    (hidden, "x.c", "const char *s = \"a\\u00a0b\";", 0),
 ]
 
 

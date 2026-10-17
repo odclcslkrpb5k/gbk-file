@@ -65,7 +65,7 @@ gbk_open_exec_argv (const GbkConfig *config, const GbkItem *it)
       g_autofree char *base = g_path_get_basename (it->path);
       const char *const *interp = gbk_config_interpreter (config, base);
       if (interp == nullptr)
-        gbk_fatal ("script without interpreter: %s", it->path);   /* it->script says so */
+        gbk_fatal ("script without interpreter");   /* it->script says there is one */
       for (size_t i = 0; interp[i] != nullptr; i++)
         g_ptr_array_add (argv, g_strdup (interp[i]));
     }

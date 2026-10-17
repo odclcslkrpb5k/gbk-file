@@ -307,7 +307,7 @@ gbk_pathbar_click (GbkPathbar *bar, const char *path)
         gtk_button_clicked (GTK_BUTTON (l->data));
         return;
       }
-  gbk_fatal ("no path bar button for %s", path);
+  gbk_fatal ("no path bar button for that folder");
 }
 
 GtkWidget *
@@ -317,7 +317,7 @@ gbk_pathbar_button (GbkPathbar *bar, const char *path)
   for (GList *l = kids; l != nullptr; l = l->next)
     if (g_str_equal (g_object_get_data (l->data, KEY_PATH), path))
       return l->data;
-  gbk_fatal ("no path bar button for %s", path);
+  gbk_fatal ("no path bar button for that folder");
 }
 
 GtkEntry *
