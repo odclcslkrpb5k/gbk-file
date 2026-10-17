@@ -129,15 +129,17 @@ Quoin then reports every problem and uses the defaults, so a typo can't half-app
 
 ## Building
 
-Everything builds inside a pinned Docker image, so the only host requirements are Docker
-and bash. Nothing is fetched during a build, and versions are git hashes.
+Everything builds inside a pinned Docker image (`Dockerfile`, `compose.yaml`), so the only
+host requirements are Docker with Compose, and bash. Nothing is fetched during a build, and
+versions are git hashes.
 
 ```sh
+./build check     # every check: everything below but bench, then the hardened build's tests
 ./build debug     # AddressSanitizer + UBSan build, all tests
 ./build analyze   # GCC static analyzer; any finding fails
 ./build fuzz 60   # libFuzzer on every parser, 60 s each
 ./build bench     # scan / sort / memory benchmark
-./build release   # all of the above (20 s fuzzing), then the hardened build and its tests
+./build release   # check (20 s fuzzing) on a clean tree, marking the binary releasable
 ./build install   # install the release build into ~/.local (runs release if needed)
 ./build publish   # upload the release build as a GitHub release (maintainer)
 ```

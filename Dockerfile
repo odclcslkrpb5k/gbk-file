@@ -11,6 +11,8 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gcc libc6-dev meson ninja-build pkgconf \
       clang llvm libclang-rt-dev \
+      clang-tools perl clang-tidy clang-format cppcheck coccinelle \
+      desktop-file-utils libgtk-3-bin \
       libgtk-3-dev \
       xvfb xauth libxtst-dev dbus-daemon \
       fonts-dejavu-core adwaita-icon-theme librsvg2-common \

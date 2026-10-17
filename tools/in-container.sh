@@ -78,7 +78,9 @@ fuzz() {
   return $status
 }
 
-release() {
+# Every check, in one command: sanitizer tests, the analyzers, fuzzing, then the hardened
+# build that ships, tested again.
+check() {
   debug
   analyze
   fuzz 20
@@ -91,6 +93,10 @@ release() {
   # The GUI suites again, several times: a test that reads state before the main loop has
   # delivered it passes or fails by timing, and the fast release build is where it shows.
   meson test -C out/release --print-errorlogs --repeat 3 window view devices
+}
+
+release() {
+  check
   # ./build install trusts only a build whose whole gate passed for this exact hash.
   printf '%s\n' "$GBK_VERSION" > out/release/released
   echo
@@ -105,6 +111,7 @@ bench() {
 }
 
 case "${1:-}" in
+  check) check ;;
   debug) debug ;;
   analyze) analyze ;;
   release) release ;;

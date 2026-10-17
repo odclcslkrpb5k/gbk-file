@@ -1,0 +1,19 @@
+# The build environment. ./build runs everything through it; `./build check` is the one
+# command that runs every check. Run directly, compose needs the variables ./build sets.
+name: quoin
+services:
+  build: &build
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: quoin-build:compose
+    network_mode: none
+    user: "${QUOIN_UID:?run through ./build}:${QUOIN_GID:?run through ./build}"
+    environment:
+      HOME: /tmp
+      GBK_VERSION: "${GBK_VERSION:?run through ./build}"
+    volumes:
+      - .:/src
+  check:
+    <<: *build
+    command: ["check"]

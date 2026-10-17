@@ -1,30 +1,36 @@
 #!/usr/bin/env bash
 # Host entry point. Everything real happens inside the Docker build image.
 #
+#   ./build check     every check: sanitizer tests, analyzers, fuzzing, hardened build + tests
 #   ./build debug     sanitizer (ASan+UBSan) build + tests
 #   ./build analyze   GCC -fanalyzer build (any finding fails)
 #   ./build fuzz [s]  libFuzzer every target for s seconds each (default 60)
 #   ./build bench     scan/sort/memory benchmark (release build, real filesystem)
-#   ./build release   debug + analyze + 20s fuzz must pass, then hardened build + tests.
-#                     Refuses a dirty tree so the embedded git hash identifies the source.
+#   ./build release   check, on a clean tree (the embedded git hash identifies the
+#                     source), then marks the hardened binary as releasable.
 #   ./build install [prefix]
 #                     install the release binary + .desktop file (default prefix ~/.local);
 #                     runs `release` first unless it already passed for this exact commit.
 #   ./build publish   GitHub release of the release binary for HEAD (what install.sh fetches)
 #   ./build shell     interactive shell in the build image
 #   ./build image     (re)build the build image
+#
+# The environment is Dockerfile + compose.yaml; every command rebuilds the image first
+# (cached), so a run never uses an image older than the Dockerfile.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 icon=io.github.odclcslkrpb5k.Quoin.svg
 cmd=${1:-}
 
-# Image tag follows the Dockerfile content, so editing it forces a rebuild.
-tag=quoin-build:$(sha256sum "$root/Dockerfile" | cut -c1-12)
+export QUOIN_UID QUOIN_GID GBK_VERSION
+QUOIN_UID=$(id -u)
+QUOIN_GID=$(id -g)
+GBK_VERSION=unset
+compose=(docker compose --project-directory "$root" -f "$root/compose.yaml")
 
 build_image() {
-  # No build context: the image needs nothing from the repo (it is mounted at run time).
-  docker build -t "$tag" - < "$root/Dockerfile"
+  "${compose[@]}" build build
 }
 
 # Host side: a release build that passed the whole gate for exactly HEAD, staged with
@@ -83,14 +89,12 @@ Install or update: \`curl -fsSL https://raw.githubusercontent.com/odclcslkrpb5k/
 }
 
 case "$cmd" in
-  debug|analyze|release|shell|fuzz|bench) ;;
+  check|debug|analyze|release|shell|fuzz|bench) ;;
   install) install_release "${2:-}"; exit 0 ;;
   publish) publish_release; exit 0 ;;
   image) build_image; exit 0 ;;
   *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
-
-docker image inspect "$tag" >/dev/null 2>&1 || build_image
 
 version=$(git -C "$root" rev-parse --short=12 HEAD)
 if [[ -n $(git -C "$root" status --porcelain) ]]; then
@@ -102,10 +106,15 @@ if [[ -n $(git -C "$root" status --porcelain) ]]; then
   version+="-dirty"
 fi
 
-tty=()
-if [[ -t 0 && -t 1 ]]; then tty=(-it); elif [[ $cmd == shell ]]; then tty=(-i); fi
+GBK_VERSION=$version
 
-# --network=none: builds are hermetic; nothing can be fetched at build time.
-# --user: run as the invoking user so build output in the repo is owned by them, not root.
-exec docker run --rm "${tty[@]}" --network=none --user "$(id -u):$(id -g)" \
-  -e HOME=/tmp -v "$root:/src" -e GBK_VERSION="$version" "$tag" "$@"
+tty=()
+[[ -t 0 && -t 1 ]] || tty=(-T)
+
+# compose.yaml: no network (nothing can be fetched at build time), and the invoking user,
+# so build output in the repo is theirs, not root's.
+service=build
+[[ $cmd == check ]] && service=check
+args=("$@")
+[[ $cmd == check ]] && args=()
+exec "${compose[@]}" run --build --quiet-build --rm "${tty[@]}" "$service" "${args[@]}"
