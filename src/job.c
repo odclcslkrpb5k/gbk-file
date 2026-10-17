@@ -201,6 +201,15 @@ run_executable (Shared *s, bool on, GError **error)
     g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
 }
 
+/* The result travels as `error` alone, so it must say what the return value said: false
+ * exactly when the error is set (GError's convention). */
+static void
+agree (bool ok, const GError *error)
+{
+  if (ok == (error != nullptr))
+    gbk_fatal ("job: returned %s with%s an error", ok ? "true" : "false", ok ? "" : "out");
+}
+
 static void *
 worker (void *data)
 {
@@ -214,16 +223,20 @@ worker (void *data)
   switch (s->kind)
     {
     case GBK_JOB_COPY:
-      gbk_ops_run (GBK_OP_COPY, s->sources, s->dest, &hooks, done->created, &done->error);
+      agree (gbk_ops_run (GBK_OP_COPY, s->sources, s->dest, &hooks, done->created, &done->error),
+             done->error);
       break;
     case GBK_JOB_MOVE:
-      gbk_ops_run (GBK_OP_MOVE, s->sources, s->dest, &hooks, done->created, &done->error);
+      agree (gbk_ops_run (GBK_OP_MOVE, s->sources, s->dest, &hooks, done->created, &done->error),
+             done->error);
       break;
     case GBK_JOB_TRASH:
-      gbk_ops_run (GBK_OP_TRASH, s->sources, s->dest, &hooks, done->created, &done->error);
+      agree (gbk_ops_run (GBK_OP_TRASH, s->sources, s->dest, &hooks, done->created, &done->error),
+             done->error);
       break;
     case GBK_JOB_DELETE:
-      gbk_ops_run (GBK_OP_DELETE, s->sources, s->dest, &hooks, done->created, &done->error);
+      agree (gbk_ops_run (GBK_OP_DELETE, s->sources, s->dest, &hooks, done->created, &done->error),
+             done->error);
       break;
     case GBK_JOB_RENAME:
       if (gbk_ops_rename (first, s->name, &done->error))
@@ -241,7 +254,7 @@ worker (void *data)
       run_executable (s, false, &done->error);
       break;
     case GBK_JOB_PERMISSIONS:
-      gbk_ops_set_permissions (first, s->rwx, &done->error);
+      agree (gbk_ops_set_permissions (first, s->rwx, &done->error), done->error);
       break;
     case GBK_JOB_INFO:
       done->info = gbk_ops_info (first, &done->error);

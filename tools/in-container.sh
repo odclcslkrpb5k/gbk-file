@@ -83,6 +83,9 @@ fuzz() {
 check() {
   debug
   analyze
+  echo "== source rules =="
+  python3 tools/check-source.py self-test
+  python3 tools/check-source.py
   echo "== static analysis (clang-tidy, cppcheck) =="
   python3 tools/analysis.py run
   python3 tools/analysis.py compare

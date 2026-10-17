@@ -55,15 +55,15 @@ typedef struct
  * Returns false only on cancellation or a fatal precondition (error set); per-item failures
  * go through hooks->error. `created` (may be nullptr) receives the basenames created in
  * dest_dir (char*, owned) so the caller can select them. */
-bool gbk_ops_run (GbkOpKind kind, GPtrArray *sources, const char *dest_dir,
+[[nodiscard]] bool gbk_ops_run (GbkOpKind kind, GPtrArray *sources, const char *dest_dir,
                   const GbkOpsHooks *hooks, GPtrArray *created, GError **error);
 
 /* Rename `path` to `new_name` in the same directory. Fails (G_IO_ERROR_EXISTS) rather than
  * replace an existing file. */
-bool gbk_ops_rename (const char *path, const char *new_name, GError **error);
+[[nodiscard]] bool gbk_ops_rename (const char *path, const char *new_name, GError **error);
 
 /* Is `name` acceptable as a single filename? (non-empty, no '/', not "." or "..") */
-bool gbk_ops_valid_name (const char *name, GError **error);
+[[nodiscard]] bool gbk_ops_valid_name (const char *name, GError **error);
 
 /* "name (1).ext" style alternative for `name` that doesn't exist in `dir`. */
 [[nodiscard]] char *gbk_ops_free_name (const char *dir, const char *name);
@@ -73,14 +73,14 @@ bool gbk_ops_valid_name (const char *name, GError **error);
 
 /* Create an empty file or folder `name` in `dir`. Never replaces anything: an existing
  * name fails with G_IO_ERROR_EXISTS. Permissions follow the umask (0666 / 0777). */
-bool gbk_ops_create (const char *dir, const char *name, bool folder, GError **error);
+[[nodiscard]] bool gbk_ops_create (const char *dir, const char *name, bool folder, GError **error);
 
 /* Turn execute permission on (for owner/group/others wherever they have read) or off
  * (for everyone). `path` must be, or link to, a regular file. */
-bool gbk_ops_set_executable (const char *path, bool executable, GError **error);
+[[nodiscard]] bool gbk_ops_set_executable (const char *path, bool executable, GError **error);
 
 /* Set the rwx bits (0777) of `path` (following a symlink); setuid/setgid/sticky are kept. */
-bool gbk_ops_set_permissions (const char *path, uint32_t rwx, GError **error);
+[[nodiscard]] bool gbk_ops_set_permissions (const char *path, uint32_t rwx, GError **error);
 
 /* What the Properties window shows. For a symlink, everything but `link_target` describes
  * what it points to (a link's own permissions mean nothing), unless it dangles. */

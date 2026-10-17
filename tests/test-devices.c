@@ -167,7 +167,7 @@ fm_unmount (GMount *mount, GMountUnmountFlags flags G_GNUC_UNUSED, GMountOperati
     }
 }
 
-static gboolean
+[[nodiscard]] static gboolean
 fm_finish (GMount *mount G_GNUC_UNUSED, GAsyncResult *res, GError **error)
 {
   return g_task_propagate_boolean (G_TASK (res), error);
@@ -292,7 +292,7 @@ release_mount (FakeVolume *v)
   complete_mount (v, t);
 }
 
-static gboolean
+[[nodiscard]] static gboolean
 fv_mount_finish (GVolume *volume G_GNUC_UNUSED, GAsyncResult *res, GError **error)
 {
   return g_task_propagate_boolean (G_TASK (res), error);

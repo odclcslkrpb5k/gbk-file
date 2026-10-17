@@ -19,7 +19,7 @@ mark_used (GbkCommand *c, char p)
   c->used[n] = p;
 }
 
-static bool
+[[nodiscard]] static bool
 check_token (GbkCommand *c, const char *tok, bool is_program, const char *allowed, GError **error)
 {
   for (const char *p = tok; *p != '\0'; p++)
