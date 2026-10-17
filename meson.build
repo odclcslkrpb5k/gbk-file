@@ -40,6 +40,7 @@ gcc_warning_flags = [
   '-Wcast-align=strict',
   '-Wtrampolines',
   '-Wduplicated-cond', '-Wduplicated-branches', '-Wlogical-op',
+  '-Wsuggest-attribute=format',    # our own printf-like functions are G_GNUC_PRINTF
 ]
 if cc.get_id() == 'gcc'
   warning_flags += gcc_warning_flags
@@ -84,6 +85,7 @@ if cc.get_id() == 'gcc'
     '-Wwrite-strings' : 'char *f(void);\nchar *f(void) { return "x"; }',
     '-Wundef' : '#if FOO\nint x;\n#endif\nint y;',
     '-Wdouble-promotion' : 'double f(float x);\ndouble f(float x) { return x * 2.0; }',
+    '-Wsuggest-attribute=format' : '#include <stdarg.h>\n#include <stdio.h>\nvoid f(const char *fmt, ...);\nvoid f(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vfprintf(stderr, fmt, ap); va_end(ap); }',
     '-Wjump-misses-init' : 'int f(int x);\nint f(int x) { if (x) goto out; int y = 2; return y; out: return 0; }',
     '-Wcast-align=strict' : 'int *f(char *p);\nint *f(char *p) { return (int *) p; }',
     '-Wtrampolines' : '#pragma GCC diagnostic ignored "-Wpedantic"\nint f(int x);\nint f(int x) { int g(void) { return x; } int (*h)(void) = g; return h(); }',

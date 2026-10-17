@@ -83,6 +83,9 @@ fuzz() {
 check() {
   debug
   analyze
+  echo "== desktop entry =="
+  sed "s|@BIN@|/usr/bin/quoin|g" data/quoin.desktop.in > out/quoin.desktop
+  desktop-file-validate out/quoin.desktop
   echo "== source rules =="
   python3 tools/check-source.py self-test
   python3 tools/check-source.py
