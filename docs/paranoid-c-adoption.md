@@ -46,7 +46,7 @@ cppcheck 2.17: every tool here is newer.
 | 10 | beada4e | `-Wsuggest-attribute=format`; desktop entry validated |
 | 11 | c21fab5 | baseline burned down from 81 to 10 (AD-4 step 6, CD-8) |
 | 12 | 7628a89 | clang-format, checked (TC-6) |
-| 13 | (next) | apt snapshot pinning; unused tools out of the image (TC-1, TC-3) |
+| 13 | 7d1b5af | apt snapshot pinning; unused tools out of the image (TC-1, TC-3) |
 
 ## Numbers
 
