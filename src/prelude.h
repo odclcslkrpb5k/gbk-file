@@ -45,6 +45,9 @@
 
 #include "gbk-config.h"
 #include "fatal.h"
+#ifdef GBK_ANALYZER
+#include "analyzer-glib.h"
+#endif
 
 /* --- Unbounded or error-swallowing libc string/number functions. ---
  * Use g_strdup_printf / GString / g_strlcpy / g_ascii_strtoll with error checks. */

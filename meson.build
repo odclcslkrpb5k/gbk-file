@@ -155,7 +155,9 @@ if get_option('hardening')
 endif
 
 if get_option('analyzer')
-  add_project_arguments('-fanalyzer', language : 'c')
+  # GBK_ANALYZER: src/analyzer-glib.h tells the analyzer GLib's allocators.
+  add_project_arguments('-fanalyzer', '-DGBK_ANALYZER', '-Wno-analyzer-malloc-leak',
+                        language : 'c')
 else
   # OpenSSF: -fexceptions so pthread cancellation unwinds through C frames. We ban
   # cancellation outright (prelude.h), so nothing can unwind; the analyzer build leaves it

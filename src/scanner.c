@@ -489,7 +489,10 @@ gbk_scanner_start (const char *path, GbkTypeTable *types)
     {
       live_remove (s);
       g_atomic_int_dec_and_test (&live_workers);
-      scanner_unref (s);                      /* the worker's reference, never used */
+      /* The worker's reference, never used. The caller's is still held, so this can't be
+       * the last one: say so, rather than call scanner_unref and use `s` after it. */
+      if (g_atomic_ref_count_dec (&s->rc))
+        gbk_fatal ("scanner: reference count reached zero while still held");
       push_error (s, GBK_SCAN_ERROR, EAGAIN);
     }
   else
