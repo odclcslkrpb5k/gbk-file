@@ -15,25 +15,40 @@ cc = meson.get_compiler('c')
 
 # Toolchain is pinned by the Docker image, so every flag here is required, not probed:
 # an unsupported flag should fail the build rather than silently weaken it.
-add_project_arguments(
-  # Every translation unit starts with the prelude (system headers, then poisoned APIs).
-  '-include', meson.project_source_root() / 'src' / 'prelude.h',
+assert(get_option('werror'), 'every warning is an error: the fixtures below rely on it')
 
-  # Warnings (all are errors via werror).
-  '-Wformat=2', '-Werror=format-security',
-  '-Wconversion', '-Wsign-conversion',
-  '-Wimplicit-fallthrough',
+# Warnings beyond warning_level=3 (-Wall -Wextra -Wpedantic). Each has a fixture below that
+# must fail with the list and compile without that one flag, so a flag that does nothing
+# (a default, a duplicate, dead under C23) can't sit here looking like protection.
+warning_flags = [
+  '-Wformat=2',
+  '-Wconversion',                  # in C, includes -Wsign-conversion
   '-Wshadow',
   '-Wvla',
   '-Wnull-dereference',
-  '-Wswitch-enum',
-  '-Wmissing-prototypes', '-Wstrict-prototypes', '-Wmissing-declarations',
+  '-Wswitch-enum',                 # a `default` doesn't excuse a missing enum value
+  '-Wmissing-prototypes',
   '-Wcast-qual',
-  '-Wpointer-arith',
   '-Wwrite-strings',
   '-Wundef',
   '-Wdouble-promotion',
-  '-Werror=implicit', '-Werror=incompatible-pointer-types', '-Werror=int-conversion',
+]
+# GCC is the compiler for every shipped and tested build. Clang builds only the libFuzzer
+# targets, which skip these (clang has no equivalent).
+gcc_warning_flags = [
+  '-Wjump-misses-init',            # goto/switch skipping a g_auto* initialisation
+  '-Wcast-align=strict',
+  '-Wtrampolines',
+  '-Wduplicated-cond', '-Wduplicated-branches', '-Wlogical-op',
+]
+if cc.get_id() == 'gcc'
+  warning_flags += gcc_warning_flags
+endif
+
+add_project_arguments(
+  # Every translation unit starts with the prelude (system headers, then poisoned APIs).
+  '-include', meson.project_source_root() / 'src' / 'prelude.h',
+  warning_flags,
 
   # Semantics: never let the optimiser exploit UB we might have.
   '-fno-strict-aliasing',
@@ -41,27 +56,77 @@ add_project_arguments(
   '-fno-delete-null-pointer-checks',
   '-fstrict-flex-arrays=3',
 
-
   '-D_GNU_SOURCE',                 # statx, O_* flags
   '-DG_LOG_DOMAIN="gbk"',
   '-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_88',
   '-DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_88',
+  '-DGDK_VERSION_MIN_REQUIRED=GDK_VERSION_3_24',
+  '-DGDK_VERSION_MAX_ALLOWED=GDK_VERSION_3_24',
   '-DGDK_DISABLE_DEPRECATED',
   '-DGTK_DISABLE_DEPRECATED',
   language : 'c',
 )
 
-# GCC is the compiler for every shipped/tested build. Clang is used only for libFuzzer
-# builds, so GCC-only warnings are skipped there (clang has no equivalent).
+# Prove the warnings are honoured. cc.compiles() leaves out warning_level's flags, so they
+# are spelled out (warning_level=3); -O2 because some warnings come from optimisation passes.
+assert(get_option('warning_level') == '3')
+fixture_base = ['-Wall', '-Wextra', '-Wpedantic', '-O2', '-Werror']
 if cc.get_id() == 'gcc'
-  add_project_arguments(
-    '-Wjump-misses-init',            # goto/switch skipping a g_auto* initialisation
-    '-Wcast-align=strict',
-    '-Wtrampolines',
-    '-Wbidi-chars=any',
-    '-Wduplicated-cond', '-Wduplicated-branches', '-Wlogical-op',
-    language : 'c',
-  )
+  flag_fixtures = {
+    '-Wformat=2' : '#include <stdio.h>\nvoid f(const char *fmt);\nvoid f(const char *fmt) { printf(fmt, 1); }',
+    '-Wconversion' : 'int f(long x);\nint f(long x) { return x; }',
+    '-Wshadow' : 'int f(int x);\nint f(int x) { if (x) { int x = 2; return x; } return 0; }',
+    '-Wvla' : 'int f(int n);\nint f(int n) { int a[n]; a[0] = 1; return a[0]; }',
+    '-Wnull-dereference' : 'int f(int *p);\nint f(int *p) { if (p) return 0; return *p; }',
+    '-Wswitch-enum' : 'enum e { A, B };\nint f(enum e x);\nint f(enum e x) { switch (x) { case A: return 1; default: return 0; } }',
+    '-Wmissing-prototypes' : 'int f(void) { return 0; }',
+    '-Wcast-qual' : 'char *f(const char *s);\nchar *f(const char *s) { return (char *) s; }',
+    '-Wwrite-strings' : 'char *f(void);\nchar *f(void) { return "x"; }',
+    '-Wundef' : '#if FOO\nint x;\n#endif\nint y;',
+    '-Wdouble-promotion' : 'double f(float x);\ndouble f(float x) { return x * 2.0; }',
+    '-Wjump-misses-init' : 'int f(int x);\nint f(int x) { if (x) goto out; int y = 2; return y; out: return 0; }',
+    '-Wcast-align=strict' : 'int *f(char *p);\nint *f(char *p) { return (int *) p; }',
+    '-Wtrampolines' : '#pragma GCC diagnostic ignored "-Wpedantic"\nint f(int x);\nint f(int x) { int g(void) { return x; } int (*h)(void) = g; return h(); }',
+    '-Wduplicated-cond' : 'int f(int x);\nint f(int x) { if (x == 1) return 1; else if (x == 1) return 2; return 0; }',
+    '-Wduplicated-branches' : 'int f(int x);\nint f(int x) { int r; if (x) r = 1; else r = 1; return r; }',
+    '-Wlogical-op' : 'int f(int x);\nint f(int x) { return x == 1 && x == 1; }',
+  }
+  foreach flag : warning_flags
+    if flag not in flag_fixtures
+      error('warning flag ' + flag + ' has no fixture in meson.build')
+    endif
+    code = flag_fixtures[flag]
+    others = []
+    foreach f : warning_flags
+      if f != flag
+        others += f
+      endif
+    endforeach
+    if cc.compiles(code, args : fixture_base + warning_flags, name : 'fixture ' + flag + ' fails')
+      error('the fixture for ' + flag + ' compiles: the flag is not honoured')
+    endif
+    if not cc.compiles(code, args : fixture_base + others, name : 'fixture ' + flag + ' needs it')
+      error(flag + ' does nothing: its fixture fails without it (a default or another flag)')
+    endif
+  endforeach
+  # Protections that come from defaults or from the flags above, not from a flag of their
+  # own (on GCC 15 with C23 these were explicit flags once, and did nothing).
+  rejected = {
+    'implicit declaration' : 'int f(void);\nint f(void) { return g(); }',
+    'int conversion' : 'int *f(int x);\nint *f(int x) { return x; }',
+    'incompatible pointers' : 'int *f(long *p);\nint *f(long *p) { return p; }',
+    'sign conversion' : 'unsigned f(int x);\nunsigned f(int x) { return x; }',
+    'implicit fallthrough' : 'int f(int x);\nint f(int x) { int r = 0; switch (x) { case 1: r = 1; case 2: r += 2; break; default: break; } return r; }',
+    'format security' : '#include <stdio.h>\nvoid f(const char *s);\nvoid f(const char *s) { printf(s); }',
+    'pointer arithmetic on void' : 'void *f(void *p);\nvoid *f(void *p) { return p + 1; }',
+    'paired bidi controls' : 'int f(void);\nint f(void) { return 0; } /* a \u202a b \u202c c */',
+    'directional mark' : 'int f(void);\nint f(void) { return 0; } /* a \u200f b */',
+  }
+  foreach what, code : rejected
+    if cc.compiles(code, args : fixture_base + warning_flags, name : 'rejects ' + what)
+      error('a fixture compiles that must not: ' + what)
+    endif
+  endforeach
 endif
 
 if get_option('fuzzing')
@@ -151,6 +216,13 @@ foreach what, code : banned
   if cc.compiles('void f(void); void f(void) { ' + code + ' }',
                  args : probe_args, dependencies : probe_deps, name : 'ban ' + what)
     error('banned API "' + what + '" compiles; prelude.h ban is not working')
+  endif
+endforeach
+
+foreach macro : ['G_DISABLE_ASSERT', 'G_DISABLE_CHECKS', 'G_DISABLE_CAST_CHECKS']
+  if cc.compiles('int f(void); int f(void) { return 0; }', args : probe_args + ['-D' + macro],
+                 dependencies : probe_deps, name : 'refuses ' + macro)
+    error(macro + ' compiles; the prelude must refuse it')
   endif
 endforeach
 

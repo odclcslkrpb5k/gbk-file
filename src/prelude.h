@@ -32,6 +32,12 @@
 #include <sys/xattr.h>
 #include <unistd.h>
 
+/* Each of these turns a check into nothing; under G_DISABLE_ASSERT, g_assert_not_reached()
+ * becomes __builtin_unreachable(): undefined behaviour where an abort was meant. */
+#if defined (G_DISABLE_ASSERT) || defined (G_DISABLE_CHECKS) || defined (G_DISABLE_CAST_CHECKS)
+#error "G_DISABLE_ASSERT, G_DISABLE_CHECKS and G_DISABLE_CAST_CHECKS must never be defined"
+#endif
+
 #include <glib.h>
 #include <glib-unix.h>
 #include <glib-object.h>
