@@ -2,6 +2,9 @@ test_env = environment()
 # Any GLib warning or critical (e.g. a failed g_return_if_fail) aborts the test.
 test_env.set('G_DEBUG', 'fatal-warnings,fatal-criticals,gc-friendly')
 test_env.set('G_ENABLE_DIAGNOSTIC', '1')
+# A callback of ours holding the main loop longer than this aborts (src/lifetime.h). The
+# worst seen under ASan was 85 ms (2026-10-17).
+test_env.set('GBK_STALL_MS', '250')
 test_env.set('ASAN_OPTIONS', 'detect_leaks=1:abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1')
 test_env.set('UBSAN_OPTIONS', 'halt_on_error=1:print_stacktrace=1')
 test_env.set('LSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'lsan.supp' + ':print_suppressions=0')

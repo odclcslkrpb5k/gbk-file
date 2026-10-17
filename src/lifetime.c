@@ -8,6 +8,42 @@ gbk_lifetime_live (void)
   return g_atomic_int_get (&live_count);
 }
 
+/* ---- Stall watch ---- */
+
+static gint64 stall_limit_us = -1;    /* -1: GBK_STALL_MS not read yet; 0: off. Main thread. */
+
+static gint64
+stall_limit (void)
+{
+  if (stall_limit_us < 0)
+    {
+      const char *v = g_getenv ("GBK_STALL_MS");
+      guint64 ms = 0;
+      if (v != nullptr && !g_ascii_string_to_unsigned (v, 10, 1, 600000, &ms, nullptr))
+        gbk_fatal ("GBK_STALL_MS must be a whole number of milliseconds, 1 to 600000");
+      stall_limit_us = (gint64) ms * 1000;
+    }
+  return stall_limit_us;
+}
+
+/* `start` from g_get_monotonic_time () before the callback, or 0 when the watch is off. */
+static gint64
+stall_start (void)
+{
+  return stall_limit () > 0 ? g_get_monotonic_time () : 0;
+}
+
+static void
+stall_check (gint64 start, const char *kind, const char *name, const char *detail)
+{
+  if (start == 0)
+    return;
+  gint64 took = g_get_monotonic_time () - start;
+  if (took > stall_limit_us)
+    gbk_fatal ("main loop blocked for %" G_GINT64_FORMAT " ms (GBK_STALL_MS=%" G_GINT64_FORMAT
+               ") by %s %s%s", took / 1000, stall_limit_us / 1000, kind, name, detail);
+}
+
 /* ---- Signals ----
  * A GClosure watched by the owner (g_object_watch_closure) is invalidated when the owner is
  * disposed; GSignal removes a handler whose closure is invalidated. The closure is also
@@ -15,15 +51,44 @@ gbk_lifetime_live (void)
  * where the live count goes down. The watch also holds a ref on the owner while the
  * callback runs, so the owner cannot be freed mid-callback. */
 
-static void
-closure_finalized (void *data G_GNUC_UNUSED, GClosure *closure G_GNUC_UNUSED)
+typedef struct
 {
+  const char *name;       /* the callback's name: a string literal from the macro */
+  const char *signal;     /* interned */
+  const char *type;       /* the instance's type name: static */
+  int depth;              /* a handler can re-enter itself by emitting its own signal */
+} Handler;
+
+static void
+closure_finalized (void *data, GClosure *closure G_GNUC_UNUSED)
+{
+  g_free (data);
   g_atomic_int_dec_and_test (&live_count);
 }
 
-static gulong
-connect_impl (GObject *owner, gpointer instance, const char *signal,
-              GCallback callback, void *data, bool after)
+/* The closure's marshal guards are taken (g_object_watch_closure uses the one pair GLib
+ * allows), so the watch times a handler from a meta-marshal around GLib's generic one:
+ * slower, so it is installed only while the watch is on. */
+static void
+timed_marshal (GClosure *closure, GValue *return_value, guint n_param_values,
+               const GValue *param_values, void *invocation_hint, void *marshal_data)
+{
+  Handler *h = marshal_data;
+  bool outer = h->depth++ == 0;
+  gint64 start = outer ? stall_start () : 0;
+  g_cclosure_marshal_generic (closure, return_value, n_param_values, param_values,
+                              invocation_hint, nullptr);
+  h->depth--;
+  if (start != 0)
+    {
+      g_autofree char *detail = g_strdup_printf (" for \"%s\" on %s", h->signal, h->type);
+      stall_check (start, "handler", h->name, detail);
+    }
+}
+
+gulong
+gbk_connect_named (GObject *owner, gpointer instance, const char *signal,
+                   GCallback callback, void *data, bool after, const char *name)
 {
   g_assert (G_IS_OBJECT (owner));
   g_assert (G_IS_OBJECT (instance));
@@ -31,7 +96,13 @@ connect_impl (GObject *owner, gpointer instance, const char *signal,
   g_assert (callback != nullptr);
 
   GClosure *closure = g_cclosure_new (callback, data, nullptr);
-  g_closure_add_finalize_notifier (closure, nullptr, closure_finalized);
+  Handler *h = g_new0 (Handler, 1);
+  h->name = name;
+  h->signal = g_intern_string (signal);
+  h->type = G_OBJECT_TYPE_NAME (instance);
+  g_closure_add_finalize_notifier (closure, h, closure_finalized);
+  if (stall_limit () > 0)
+    g_closure_set_meta_marshal (closure, h, timed_marshal);
   g_atomic_int_inc (&live_count);
   g_object_watch_closure (owner, closure);
 
@@ -41,19 +112,6 @@ connect_impl (GObject *owner, gpointer instance, const char *signal,
   return id;
 }
 
-gulong
-gbk_connect (GObject *owner, gpointer instance, const char *signal,
-             GCallback callback, void *data)
-{
-  return connect_impl (owner, instance, signal, callback, data, false);
-}
-
-gulong
-gbk_connect_after (GObject *owner, gpointer instance, const char *signal,
-                   GCallback callback, void *data)
-{
-  return connect_impl (owner, instance, signal, callback, data, true);
-}
 
 /* ---- Sources ----
  * The record is freed only by the source's destroy notify, which GLib defers until any
@@ -66,6 +124,7 @@ typedef struct
   GbkFdFunc fd_fn;
   void *data;
   GSource *source;     /* borrowed; valid until source_destroyed */
+  const char *name;    /* the callback's name: a string literal from the macro */
 } SourceRec;
 
 static void
@@ -84,7 +143,9 @@ dispatch_common (SourceRec *r, int fd, GIOCondition condition)
   /* Hold the owner across the callback: if the callback drops the last other ref, the
    * owner is disposed at our unref below, after the callback has returned. */
   GObject *owner = g_object_ref (r->owner);
+  gint64 start = stall_start ();
   bool keep = r->fn != nullptr ? r->fn (r->data) : r->fd_fn (fd, condition, r->data);
+  stall_check (start, "source", r->name, "");
   g_object_unref (owner);
 
   return (keep && r->owner != nullptr) ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
@@ -117,7 +178,8 @@ source_destroyed (void *p)
 }
 
 static guint
-add_source (GObject *owner, GSource *source, GbkSourceFunc fn, GbkFdFunc fd_fn, void *data)
+add_source (GObject *owner, GSource *source, GbkSourceFunc fn, GbkFdFunc fd_fn, void *data,
+            const char *name)
 {
   g_assert (G_IS_OBJECT (owner));
   g_assert ((fn != nullptr) != (fd_fn != nullptr));
@@ -128,6 +190,7 @@ add_source (GObject *owner, GSource *source, GbkSourceFunc fn, GbkFdFunc fd_fn, 
   r->fd_fn = fd_fn;
   r->data = data;
   r->source = source;
+  r->name = name;
   g_atomic_int_inc (&live_count);
 
   g_object_weak_ref (owner, owner_disposed, r);
@@ -142,23 +205,25 @@ add_source (GObject *owner, GSource *source, GbkSourceFunc fn, GbkFdFunc fd_fn, 
 }
 
 guint
-gbk_idle_add (GObject *owner, GbkSourceFunc fn, void *data)
+gbk_idle_add_named (GObject *owner, GbkSourceFunc fn, void *data, const char *name)
 {
-  return add_source (owner, g_idle_source_new (), fn, nullptr, data);
+  return add_source (owner, g_idle_source_new (), fn, nullptr, data, name);
 }
 
 guint
-gbk_timeout_add (GObject *owner, guint interval_ms, GbkSourceFunc fn, void *data)
+gbk_timeout_add_named (GObject *owner, guint interval_ms, GbkSourceFunc fn, void *data,
+                       const char *name)
 {
-  return add_source (owner, g_timeout_source_new (interval_ms), fn, nullptr, data);
+  return add_source (owner, g_timeout_source_new (interval_ms), fn, nullptr, data, name);
 }
 
 guint
-gbk_fd_watch (GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn, void *data)
+gbk_fd_watch_named (GObject *owner, int fd, GIOCondition condition, GbkFdFunc fn, void *data,
+                    const char *name)
 {
   g_assert (fd >= 0);
   g_assert (fn != nullptr);
-  return add_source (owner, g_unix_fd_source_new (fd, condition), nullptr, fn, data);
+  return add_source (owner, g_unix_fd_source_new (fd, condition), nullptr, fn, data, name);
 }
 
 /* ---- Clipboard requests ----
@@ -171,6 +236,7 @@ typedef struct
   GbkClipboardFunc fn;
   void *data;
   GDestroyNotify destroy;
+  const char *name;
 } ClipReq;
 
 static void
@@ -180,7 +246,9 @@ clipboard_received (GtkClipboard *clipboard G_GNUC_UNUSED, GtkSelectionData *sd,
   GObject *owner = g_weak_ref_get (&r->owner);
   if (owner != nullptr)
     {
+      gint64 start = stall_start ();
       r->fn (sd, r->data);
+      stall_check (start, "clipboard callback", r->name, "");
       g_object_unref (owner);
     }
   if (r->destroy != nullptr)
@@ -191,8 +259,9 @@ clipboard_received (GtkClipboard *clipboard G_GNUC_UNUSED, GtkSelectionData *sd,
 }
 
 void
-gbk_clipboard_request (GObject *owner, GtkClipboard *clipboard, GdkAtom target,
-                       GbkClipboardFunc fn, void *data, GDestroyNotify destroy)
+gbk_clipboard_request_named (GObject *owner, GtkClipboard *clipboard, GdkAtom target,
+                             GbkClipboardFunc fn, void *data, GDestroyNotify destroy,
+                             const char *name)
 {
   g_assert (G_IS_OBJECT (owner) && fn != nullptr);
   ClipReq *r = g_new0 (ClipReq, 1);
@@ -200,6 +269,7 @@ gbk_clipboard_request (GObject *owner, GtkClipboard *clipboard, GdkAtom target,
   r->fn = fn;
   r->data = data;
   r->destroy = destroy;
+  r->name = name;
   g_atomic_int_inc (&live_count);
   gtk_clipboard_request_contents (clipboard, target, clipboard_received, r);
 }
