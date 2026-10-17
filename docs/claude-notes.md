@@ -390,5 +390,9 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   0 means "succeed" there (bit me once).
 - MY RECURRING SLIP: filtering build output (grep) hid failures/compile errors twice.
   Always: set -o pipefail; ./build X > out/build.log; echo exit; grep error: too.
+  Third time (2026-10-16): a background `./build check > log; echo exit $?` always "exits
+  0", I read the notification, not the echoed line, and pushed a commit whose tests failed
+  (69eded6). Fix: run `./build check > log 2>&1` as the background command ITSELF, nothing
+  after it, so the task's exit code is the check's.
 - Not built yet (proposed 2026-10-11): New Folder/New File, rubber-band selection, drag and
   drop (ask user if they use it), remember window size, parallel statx.

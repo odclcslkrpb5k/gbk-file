@@ -202,7 +202,8 @@ run_executable (Shared *s, bool on, GError **error)
 }
 
 /* The result travels as `error` alone, so it must say what the return value said: false
- * exactly when the error is set (GError's convention). */
+ * exactly when the error is set (GError's convention). Read the error only after the call
+ * has returned: as two arguments of one call, their order is unspecified. */
 static void
 agree (bool ok, const GError *error)
 {
@@ -220,23 +221,24 @@ worker (void *data)
   done->type = MSG_FINISHED;
   done->created = g_ptr_array_new_with_free_func (g_free);
   const char *first = g_ptr_array_index (s->sources, 0);
+  bool ok;
   switch (s->kind)
     {
     case GBK_JOB_COPY:
-      agree (gbk_ops_run (GBK_OP_COPY, s->sources, s->dest, &hooks, done->created, &done->error),
-             done->error);
+      ok = gbk_ops_run (GBK_OP_COPY, s->sources, s->dest, &hooks, done->created, &done->error);
+      agree (ok, done->error);
       break;
     case GBK_JOB_MOVE:
-      agree (gbk_ops_run (GBK_OP_MOVE, s->sources, s->dest, &hooks, done->created, &done->error),
-             done->error);
+      ok = gbk_ops_run (GBK_OP_MOVE, s->sources, s->dest, &hooks, done->created, &done->error);
+      agree (ok, done->error);
       break;
     case GBK_JOB_TRASH:
-      agree (gbk_ops_run (GBK_OP_TRASH, s->sources, s->dest, &hooks, done->created, &done->error),
-             done->error);
+      ok = gbk_ops_run (GBK_OP_TRASH, s->sources, s->dest, &hooks, done->created, &done->error);
+      agree (ok, done->error);
       break;
     case GBK_JOB_DELETE:
-      agree (gbk_ops_run (GBK_OP_DELETE, s->sources, s->dest, &hooks, done->created, &done->error),
-             done->error);
+      ok = gbk_ops_run (GBK_OP_DELETE, s->sources, s->dest, &hooks, done->created, &done->error);
+      agree (ok, done->error);
       break;
     case GBK_JOB_RENAME:
       if (gbk_ops_rename (first, s->name, &done->error))
@@ -254,7 +256,8 @@ worker (void *data)
       run_executable (s, false, &done->error);
       break;
     case GBK_JOB_PERMISSIONS:
-      agree (gbk_ops_set_permissions (first, s->rwx, &done->error), done->error);
+      ok = gbk_ops_set_permissions (first, s->rwx, &done->error);
+      agree (ok, done->error);
       break;
     case GBK_JOB_INFO:
       done->info = gbk_ops_info (first, &done->error);
