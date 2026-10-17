@@ -2,6 +2,9 @@ test_env = environment()
 # Any GLib warning or critical (e.g. a failed g_return_if_fail) aborts the test.
 test_env.set('G_DEBUG', 'fatal-warnings,fatal-criticals,gc-friendly')
 test_env.set('G_ENABLE_DIAGNOSTIC', '1')
+# No OpenGL: Mesa's GLX setup, when GDK probes it, leaks allocations LSan would report
+# (fontconfig stays the only suppression).
+test_env.set('GDK_GL', 'disable')
 # A callback of ours holding the main loop longer than this aborts (src/lifetime.h). The
 # worst seen under ASan was 85 ms (2026-10-17).
 test_env.set('GBK_STALL_MS', '250')

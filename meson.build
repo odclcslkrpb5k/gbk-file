@@ -42,8 +42,12 @@ gcc_warning_flags = [
   '-Wduplicated-cond', '-Wduplicated-branches', '-Wlogical-op',
   '-Wsuggest-attribute=format',    # our own printf-like functions are G_GNUC_PRINTF
 ]
+# Clang's -Wextra, unlike GCC's, leaves out -Wimplicit-fallthrough.
+clang_warning_flags = ['-Wimplicit-fallthrough']
 if cc.get_id() == 'gcc'
   warning_flags += gcc_warning_flags
+elif cc.get_id() == 'clang'
+  warning_flags += clang_warning_flags
 endif
 
 add_project_arguments(
@@ -222,6 +226,16 @@ foreach what, code : banned
     error('banned API "' + what + '" compiles; prelude.h ban is not working')
   endif
 endforeach
+
+if cc.get_id() == 'clang'
+  fallthrough = 'int f(int x);\nint f(int x) { int r = 0; switch (x) { case 1: r = 1; case 2: r += 2; break; default: break; } return r; }'
+  if cc.compiles(fallthrough, args : fixture_base + warning_flags, name : 'clang fixture -Wimplicit-fallthrough fails')
+    error('the fixture for -Wimplicit-fallthrough compiles under clang: the flag is not honoured')
+  endif
+  if not cc.compiles(fallthrough, args : fixture_base, name : 'clang fixture -Wimplicit-fallthrough needs it')
+    error('-Wimplicit-fallthrough does nothing under clang: its fixture fails without it')
+  endif
+endif
 
 foreach macro : ['G_DISABLE_ASSERT', 'G_DISABLE_CHECKS', 'G_DISABLE_CAST_CHECKS']
   if cc.compiles('int f(void); int f(void) { return 0; }', args : probe_args + ['-D' + macro],

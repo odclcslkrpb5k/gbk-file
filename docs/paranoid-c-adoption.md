@@ -193,7 +193,7 @@ Verdicts: **as written**, **changed** (what and why), **wrong**, **n/a**.
   use C23's `ckd_add`; Quoin uses `gnu23`. Under C23 on GCC 15, eight of the appendix's
   (and Quoin's) flags do nothing: `-Wstrict-prototypes` (dead: `int f()` is a prototype
   in C23, in both compilers), `-Wsign-conversion` (in `-Wconversion`, both compilers —
-  confirmed), `-Wimplicit-fallthrough` (in `-Wextra`), `-Wmissing-declarations` (same as
+  confirmed), `-Wimplicit-fallthrough` (in GCC's `-Wextra`; **not** in Clang's, so the Clang builds — fuzz targets, clang-tidy's database — need it, with their own fixture: corrected 2026-10-17 after a recheck by the standard's maintainer), `-Wmissing-declarations` (same as
   `-Wmissing-prototypes` in C), `-Wpointer-arith` (in `-Wpedantic`), and
   `-Werror=implicit`, `-Werror=incompatible-pointer-types`, `-Werror=int-conversion`
   (errors by default since GCC 14, and `werror` covers them anyway). `-Wbidi-chars=any`:
@@ -317,7 +317,9 @@ Verdicts: **as written**, **changed** (what and why), **wrong**, **n/a**.
 - *TS-3 leaks: "a GTK suppression file, about 100 KB in 482 allocations".* **Wrong on
   these versions**: one window created and destroyed leaks 21,656 bytes in 690 allocations
   under LSan, and every byte is fontconfig's cache. One line, `leak:libfontconfig.so`,
-  suppresses all of it, and Quoin's whole GUI suite passes LSan with only that line. A
+  suppresses all of it, and Quoin's whole GUI suite passes LSan with only that line. On
+  Debian the maintainer saw ~108 KB more from Mesa's GLX setup (epoxy probing GL when GDK
+  opens the display); the image has Mesa too, so the tests set `GDK_GL=disable`. A
   broad GTK suppression file would hide the application's own GObject leaks.
 - *TS-16 fuzz every parser.* **As written** (7 libFuzzer targets; seeds replayed as tests).
   theft: not used.
