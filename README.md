@@ -62,9 +62,8 @@ program that won't start. On anything else, [build from source](#building).
   extended attributes and ACLs, hard links within the copy, and special files are kept.
 - **Create files and folders** from the right-click menu on empty space.
 - **Devices** in the ☰ menu: File System (/), then USB sticks, other partitions, phones
-  and the like. Open one
-  (mounting it first if needed, with a password prompt if the system asks), unmount it, or
-  eject it. Before a device is unmounted, tabs showing it move off it, so Quoin itself
+  and the like. Open one (mounting it first if needed, with a password prompt if the
+  system asks), unmount it, or eject it. Before a device is unmounted, tabs showing it move off it, so Quoin itself
   never keeps it busy. Uses udisks2 through gvfs where installed, as Thunar does.
 - **Properties** (right-click menu or Alt+Enter): dates (modified, accessed, changed,
   created), size, owner, group, link target, and read / write / execute permissions you can
@@ -147,7 +146,13 @@ versions are git hashes.
 `release`, `install` and `publish` refuse to run with uncommitted changes, so a version
 hash always names exact source.
 
-The build environment is Ubuntu 26.04 with GCC 15, GTK 3.24, GLib 2.88 and Meson.
+The build environment is Ubuntu 26.04 with GCC 15, GTK 3.24, GLib 2.88 and Meson, every
+package from one dated snapshot of the Ubuntu archive. `./build check` runs the test suites
+under AddressSanitizer and UBSan, GCC's static analyzer (taught GLib's allocators),
+clang-tidy and cppcheck behind a baseline that only shrinks, the project's own source rules
+(`tools/check-source.py`), clang-format, libFuzzer on every parser, and the hardened build's
+tests and binary checks. How it got there, and what each check found:
+[docs/paranoid-c-adoption.md](docs/paranoid-c-adoption.md).
 Building natively without Docker should work with those or newer versions (Meson ≥ 1.3,
 a C23 compiler). That path is not tested:
 
@@ -167,7 +172,8 @@ These are checks the build enforces, not guidelines:
   can fire into a destroyed window. A counter of live registrations must return to zero
   when the program exits.
 - All filesystem access for a folder happens on a worker thread, so a hung network mount
-  can't freeze the window.
+  can't freeze the window. In the tests, any callback that holds the main loop for more
+  than 250 ms fails the run and names itself.
 - File operations never overwrite in place: they write a temp file, fsync it and rename
   it over the target. Creation and renames refuse to replace existing files. Recursive
   delete never follows symlinks out of the tree being deleted.

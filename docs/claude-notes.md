@@ -388,6 +388,21 @@ GUI (libgbk-gui; tests under Xvfb started by in-container.sh, is_parallel:false)
   dbus-daemon (Dockerfile dbus-daemon; in-container.sh start_x). tests/test-devices.c fakes
   GVolumeMonitor/GVolume/GMount (folders as mounts). Fake fail code 0 == G_IO_ERROR_FAILED:
   0 means "succeed" there (bit me once).
+- PARANOID C (2026-10-16/17): the user (via the paranoid-typescript session) asked to adopt the
+  standard's draft C/GTK appendix and report back. Full record: docs/paranoid-c-adoption.md.
+  What now exists: ./build check (compose.yaml; release = check + stamp); meson.build warning
+  flags each with a fixture (a flag that does nothing fails configure); prelude refuses
+  G_DISABLE_*; tools/check-binary.sh (readelf + DW_AT_producer per unit); src/analyzer-glib.h
+  (analyzer build only: GLib allocators declared to -fanalyzer; leak warnings off, GCC 15.2
+  FP with g_autofree); tools/analysis.py = clang-tidy + cppcheck vs tools/analysis-baseline.txt
+  (compared to origin/main's copy, which ./build writes; may only shrink; 10 permanent
+  entries); tools/check-source.py rules (nodiscard on GError ** functions, unsequenced &x/x
+  args, NULL GError with discarded result, no suppressions/(void) casts except VOID_CASTS,
+  no paths in src logs, no ->message comparisons, no hidden chars), self-test first;
+  stall watch (lifetime.c, GBK_STALL_MS=250 in tests; registration functions are macros
+  passing #callback); clang-format (.clang-format, whitespace commit in
+  .git-blame-ignore-revs); Dockerfile packages from snapshot.ubuntu.com (SNAPSHOT arg;
+  move the date to take updates). The peer standard wants no CI; the user's rule wins.
 - MY RECURRING SLIP: filtering build output (grep) hid failures/compile errors twice.
   Always: set -o pipefail; ./build X > out/build.log; echo exit; grep error: too.
   Third time (2026-10-16): a background `./build check > log; echo exit $?` always "exits
