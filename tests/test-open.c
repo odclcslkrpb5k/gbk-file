@@ -184,8 +184,12 @@ main (int argc, char **argv)
   rm[0] = g_strdup ("rm");
   rm[1] = g_strdup ("-rf");
   rm[2] = g_strdup (tmp);
-  g_spawn_sync (nullptr, rm, nullptr, G_SPAWN_SEARCH_PATH, nullptr, nullptr, nullptr, nullptr,
-                nullptr, nullptr);
+  int rm_status = 0;
+  g_autoptr (GError) error = nullptr;
+  if (!g_spawn_sync (nullptr, rm, nullptr, G_SPAWN_SEARCH_PATH, nullptr, nullptr, nullptr, nullptr,
+                     &rm_status, &error)
+      || !g_spawn_check_wait_status (rm_status, &error))
+    gbk_fatal ("removing the test folder: %s", error->message);
   g_free (tmp);
   return status;
 }

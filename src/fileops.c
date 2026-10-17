@@ -595,16 +595,21 @@ move_into (Ctx *c, const char *src, const char *dst_dir, const char *name, int d
           if (S_ISDIR (st.st_mode))
             {
               /* Merge: move each child in, then remove the source if it ended up empty. */
-              g_autoptr (GDir) d = g_dir_open (src, 0, nullptr);
+              DIR *d = opendir (src);
               if (d == nullptr)
-                return fail_errno (c, src, EACCES, "Can't read folder");
-              const char *child;
-              while ((child = g_dir_read_name (d)) != nullptr)
+                return fail_errno (c, src, errno, "Can't read folder");
+              bool ok = true;
+              const struct dirent *de;
+              while (ok && (de = readdir (d)) != nullptr)
                 {
-                  g_autofree char *cs = g_build_filename (src, child, nullptr);
-                  if (!move_into (c, cs, dst, child, depth + 1, nullptr))
-                    return false;
+                  if (g_str_equal (de->d_name, ".") || g_str_equal (de->d_name, ".."))
+                    continue;
+                  g_autofree char *cs = g_build_filename (src, de->d_name, nullptr);
+                  ok = move_into (c, cs, dst, de->d_name, depth + 1, nullptr);
                 }
+              closedir (d);
+              if (!ok)
+                return false;
               rmdir (src);                    /* fails harmlessly if something was skipped */
               if (created != nullptr)
                 g_ptr_array_add (created, g_strdup (final_name));

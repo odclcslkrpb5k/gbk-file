@@ -8,6 +8,10 @@ Rules:
   nodiscard   a function that reports failure through GError ** and returns a value is
               [[nodiscard]]: a declaration in a header, or a static function. (An exported
               function's definition is covered by its header's declaration.)
+  discarded   a call passes NULL for a GError ** parameter and also discards its return
+              value: the failure leaves no trace at all. (NULL is fine where the return
+              value says what failed.) Which parameters are GError ** comes from the
+              preprocessed prelude (every GLib and GTK prototype) and our own headers.
   unsequenced one argument of a call hands &x to a nested call while another argument reads
               x: the order the arguments are evaluated in is unspecified, so x may be read
               before the nested call has written it. No compiler warning or analyzer here
@@ -20,6 +24,7 @@ That gap is what the self-test's examples pin down.
 
 import glob
 import re
+import subprocess
 import sys
 
 COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
@@ -91,12 +96,74 @@ def unsequenced(path, text):
     return sorted(set(problems))
 
 
-RULES = [nodiscard, unsequenced]
+CALL = re.compile(r"\b([A-Za-z_][A-Za-z_0-9]*)\s*\(")
+GERROR_PARAM = re.compile(r"\bGError\s*\*\s*\*")
+
+
+def gerror_params(text):
+    """{function: positions of its GError ** parameters}, from declarations in `text`."""
+    table = {}
+    for m in CALL.finditer(text):
+        parsed = top_level_args(text, m.end() - 1)
+        if parsed is not None:
+            for i, arg in enumerate(parsed[0]):
+                if GERROR_PARAM.search(arg):
+                    table.setdefault(m.group(1), set()).add(i)
+    return table
+
+
+def prototypes():
+    """Every GLib, GTK and project function taking GError **, as the compiler sees them."""
+    flags = subprocess.run(["pkg-config", "--cflags", "gtk+-3.0"], capture_output=True,
+                           text=True, check=True).stdout.split()
+    builds = sorted(glob.glob("out/*/gbk-config.h"))
+    if not builds:
+        sys.exit("check-source: no configured build (gbk-config.h) to preprocess the prelude with")
+    pre = subprocess.run(["gcc", "-E", "-P", "-std=gnu23", "-D_GNU_SOURCE",
+                          "-I" + builds[0].rsplit("/", 1)[0]] + flags
+                         + ["-include", "src/prelude.h", "-x", "c", "/dev/null"],
+                         capture_output=True, text=True)
+    if pre.returncode != 0:
+        sys.exit("check-source: preprocessing the prelude failed\n" + pre.stderr[-2000:])
+    ours = "".join(COMMENT.sub(" ", open(h).read()) for h in sorted(glob.glob("src/*.h")))
+    table = gerror_params(pre.stdout + ours)
+    if len(table) < 100:
+        sys.exit(f"check-source: only {len(table)} functions take GError **; the prelude parse broke")
+    return table
+
+
+GERROR_TABLE = {}
+
+
+def discarded(path, text):
+    problems = []
+    code = STRING.sub('""', COMMENT.sub(" ", text))
+    for m in CALL.finditer(code):
+        params = GERROR_TABLE.get(m.group(1))
+        if not params:
+            continue
+        parsed = top_level_args(code, m.end() - 1)
+        if parsed is None:
+            continue
+        args = [a.strip() for a in parsed[0]]
+        if not any(i < len(args) and args[i] in ("nullptr", "NULL") for i in params):
+            continue
+        before = code[:m.start()].rstrip()
+        after = code[parsed[1]:].lstrip()
+        if (before == "" or before[-1] in ";{}" or before.endswith("(void)")) and after.startswith(";"):
+            line = code.count("\n", 0, m.start()) + 1
+            problems.append(f"{path}:{line}: {m.group(1)} with no GError and its result discarded:"
+                            " a failure here leaves no trace")
+    return problems
+
+
+RULES = [nodiscard, unsequenced, discarded]
 # Declarations of GLib's own functions, for the analyzer: not ours to mark.
 EXEMPT = {"src/analyzer-glib.h"}
 
 
 def check():
+    GERROR_TABLE.update(prototypes())
     problems = []
     files = sorted(glob.glob("src/*.[ch]") + glob.glob("tests/*.[ch]") + glob.glob("tests/*/*.[ch]"))
     if len(files) < 20:
@@ -137,10 +204,20 @@ EXAMPLES = [
     (unsequenced, "x.c", "g (f (\"&e\"), e);", 0),
     (unsequenced, "x.c", "check (read (fd, &v, sizeof v), sizeof v);", 0),
     (unsequenced, "x.c", "check (read (fd, &v, sizeof (v)), v);", 1),
+    (discarded, "x.c", "  load (path, nullptr);", 1),
+    (discarded, "x.c", "{ load (path, NULL); }", 1),
+    (discarded, "x.c", "(void) load (path, nullptr);", 1),
+    (discarded, "x.c", "  if (!load (path, nullptr))\n    return;", 0),
+    (discarded, "x.c", "  ok = load (path, nullptr);", 0),
+    (discarded, "x.c", "  load (path, &error);", 0),
+    (discarded, "x.c", "  g_autofree char *s = read (0, 1, nullptr);", 0),
+    (discarded, "x.c", "  return load (path, nullptr);", 0),
 ]
 
 
 def self_test():
+    GERROR_TABLE.update(gerror_params("bool load (const char *p, GError **error);\n"
+                                       "char *read (int fd, int n, GError **error);"))
     failed = 0
     for rule, name, source, expected in EXAMPLES:
         got = len(rule(name, source))

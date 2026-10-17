@@ -41,7 +41,9 @@ populate (const char *dir, int n)
             close (fd);
         }
     }
-  g_file_set_contents (stamp, "", 0, nullptr);
+  g_autoptr (GError) error = nullptr;
+  if (!g_file_set_contents (stamp, "", 0, &error))
+    gbk_fatal ("bench data stamp: %s", error->message);
 }
 
 typedef struct
