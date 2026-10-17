@@ -273,7 +273,10 @@ storm (void *data)
           }
         case 1: unlink (a); break;
         case 2: rename (a, b); break;
-        default: mkdir (a, 0755) == 0 ? (void) rmdir (a) : (void) 0; break;
+        default:
+          if (mkdir (a, 0755) == 0)
+            rmdir (a);
+          break;
         }
     }
   g_rand_free (r);

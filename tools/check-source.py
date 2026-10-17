@@ -12,6 +12,10 @@ Rules:
               value: the failure leaves no trace at all. (NULL is fine where the return
               value says what failed.) Which parameters are GError ** comes from the
               preprocessed prelude (every GLib and GTK prototype) and our own headers.
+  suppression no local overrides: #pragma GCC/clang diagnostic, NOLINT, cppcheck-suppress,
+              and no (void) or (void) ! cast on a call, which silences [[nodiscard]] and
+              warn_unused_result. Exceptions are listed in VOID_CASTS below, per file, with
+              their exact count and their reason, so one can't be added in passing.
   unsequenced one argument of a call hands &x to a nested call while another argument reads
               x: the order the arguments are evaluated in is unspecified, so x may be read
               before the nested call has written it. No compiler warning or analyzer here
@@ -157,7 +161,35 @@ def discarded(path, text):
     return problems
 
 
-RULES = [nodiscard, unsequenced, discarded]
+# Files allowed (void) casts on calls: exact count, and why.
+VOID_CASTS = {
+    "src/fileops.c": (6, "copying keeps owner, xattrs, mode and times as far as the "
+                         "destination allows, as cp -a does: each failure is expected and "
+                         "the copy itself has already succeeded"),
+    "src/window.c": (1, "a device action for an id that names no device (a stale menu or a "
+                        "stray D-Bus activation) does nothing"),
+}
+VOID_CAST = re.compile(r"\(\s*void\s*\)\s*!?\s*[A-Za-z_][A-Za-z_0-9]*\s*\(")
+SUPPRESSION = re.compile(r"#\s*pragma\s+(GCC|clang)\s+diagnostic|\bNOLINT|cppcheck-suppress")
+
+
+def suppression(path, text):
+    problems = []
+    for m in SUPPRESSION.finditer(text):
+        line = text.count("\n", 0, m.start()) + 1
+        problems.append(f"{path}:{line}: suppression ({m.group(0)}): put the exception in the "
+                        "tool's configuration, scoped to its files")
+    code = STRING.sub('""', COMMENT.sub(" ", text))
+    casts = [code.count("\n", 0, m.start()) + 1 for m in VOID_CAST.finditer(code)]
+    allowed = VOID_CASTS.get(path, (0, ""))[0]
+    if len(casts) != allowed:
+        where = ", ".join(str(n) for n in casts)
+        problems.append(f"{path}: {len(casts)} (void) casts on calls (lines {where or 'none'}), "
+                        f"{allowed} allowed by VOID_CASTS in tools/check-source.py")
+    return problems
+
+
+RULES = [nodiscard, unsequenced, discarded, suppression]
 # Declarations of GLib's own functions, for the analyzer: not ours to mark.
 EXEMPT = {"src/analyzer-glib.h"}
 
@@ -212,6 +244,15 @@ EXAMPLES = [
     (discarded, "x.c", "  load (path, &error);", 0),
     (discarded, "x.c", "  g_autofree char *s = read (0, 1, nullptr);", 0),
     (discarded, "x.c", "  return load (path, nullptr);", 0),
+    (suppression, "x.c", "#pragma GCC diagnostic ignored \"-Wshadow\"", 1),
+    (suppression, "x.c", "# pragma clang diagnostic push", 1),
+    (suppression, "x.c", "int x = f (); // NOLINT", 1),
+    (suppression, "x.c", "// cppcheck-suppress nullPointer\nint x;", 1),
+    (suppression, "x.c", "  (void) load (p, &e);", 1),
+    (suppression, "x.c", "  (void) !write (fd, b, n);", 1),
+    (suppression, "x.c", "  (void) 0;\n  (void) unused_param;", 0),
+    (suppression, "x.c", "  x = (void *) f (y);", 0),
+    (suppression, "x.c", "  /* (void) f (); */", 0),
 ]
 
 
