@@ -108,6 +108,12 @@ fi
 
 GBK_VERSION=$version
 
+# The analyzers' baseline as committed at origin/main (as last fetched): the gate refuses a
+# count above it, so one commit can't raise the baseline and add the finding.
+mkdir -p "$root/out/analysis"
+git -C "$root" show origin/main:tools/analysis-baseline.txt > "$root/out/analysis/origin-baseline.txt" 2>/dev/null \
+  || printf '# origin/main has no baseline\n' > "$root/out/analysis/origin-baseline.txt"
+
 tty=()
 [[ -t 0 && -t 1 ]] || tty=(-T)
 

@@ -83,6 +83,9 @@ fuzz() {
 check() {
   debug
   analyze
+  echo "== static analysis (clang-tidy, cppcheck) =="
+  python3 tools/analysis.py run
+  python3 tools/analysis.py compare
   fuzz 20
   echo "== release (hardened) =="
   start_x

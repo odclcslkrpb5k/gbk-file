@@ -1,0 +1,52 @@
+# clang-tidy, run by tools/analysis.py behind tools/analysis-baseline.txt.
+#
+# The families are on; each check turned off names why (counts: Quoin, 2026-10-16, none of
+# them a defect):
+#   bugprone-casting-through-void              605: GObject's cast macros, G_OBJECT (x) and
+#                                              kin, cast through void *; the advice is C++'s
+#                                              reinterpret_cast
+#   bugprone-easily-swappable-parameters        62: a style opinion about every (a, b) pair
+#   bugprone-reserved-identifier, cert-dcl37-c,
+#   cert-dcl51-cpp                              48: names inside GLib's own macros
+#                                              (g_str_has_prefix declares __prefix)
+#   bugprone-multi-level-implicit-pointer-conversion
+#                                               36: g_steal_pointer, g_clear_pointer and kin
+#                                              take void **
+#   bugprone-assignment-in-if-condition         21: GLib macros (g_str_has_prefix) and the
+#                                              while ((x = next ())) idiom
+#   bugprone-sizeof-expression                   1: g_set_object's macro
+#   cert-err33-c                                 7: fprintf to stderr, which has nowhere to
+#                                              report its own failure
+#   clang-analyzer-unix.Malloc                   9: the analyzer never runs cleanup
+#                                              functions, so every g_autofree on an
+#                                              allocation it knows is a "leak"; GCC's
+#                                              -fanalyzer, taught GLib's allocators
+#                                              (src/analyzer-glib.h), checks g_free instead
+#   clang-analyzer-optin.core.EnumCastOutOfRange
+#                                               43: GTK's flag enums (0, or several flags
+#                                              or'ed together) are not single enumerators
+#   clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+#                                                9: asks for C11 Annex K (memcpy_s), which
+#                                              glibc does not have
+#   clang-analyzer-valist.Uninitialized          6: Clang 21 does not model C23's
+#                                              va_start (__builtin_c23_va_start), so every
+#                                              va_arg reads as uninitialized
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  -bugprone-casting-through-void,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-assignment-in-if-condition,
+  -bugprone-sizeof-expression,
+  -cert-err33-c,
+  -clang-analyzer-unix.Malloc,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-valist.Uninitialized
+WarningsAsErrors: ''

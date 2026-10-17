@@ -1,0 +1,9 @@
+# cppcheck checks that do not apply here, each with its reason (counts: 2026-10-16).
+#
+# 86, all in tests: g_assert (f ()) "has a side effect if assertions are compiled out".
+# They never are: src/prelude.h refuses G_DISABLE_ASSERT, and the g_assert_* test macros
+# are not affected by it anyway.
+assertWithSideEffect
+# 21: a callback's parameter "could be const", but its type is fixed by the GTK or GLib
+# signal it is connected to.
+constParameterCallback

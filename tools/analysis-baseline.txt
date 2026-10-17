@@ -1,0 +1,41 @@
+# Static analysis baseline: findings tolerated per tool, check and file (tools/analysis.py).
+# It may only shrink: a new finding fails ./build check, and so does a fixed one still
+# listed here. Taken 2026-10-16 (Paranoid C adoption, step 4); none of these is a defect.
+#
+# tool check file count
+clang-tidy bugprone-implicit-widening-of-multiplication-result src/config.c 1
+clang-tidy bugprone-implicit-widening-of-multiplication-result src/dirmodel.c 1
+clang-tidy bugprone-implicit-widening-of-multiplication-result src/job.c 1
+clang-tidy bugprone-implicit-widening-of-multiplication-result tests/test-devices.c 1
+clang-tidy bugprone-implicit-widening-of-multiplication-result tests/test-job.c 1
+clang-tidy bugprone-implicit-widening-of-multiplication-result tests/test-window.c 1
+clang-tidy clang-analyzer-deadcode.DeadStores tests/test-window.c 1
+clang-tidy clang-analyzer-unix.StdCLibraryFunctions src/fileops.c 1
+cppcheck constParameterPointer src/browser.c 5
+cppcheck constParameterPointer src/devices.c 2
+cppcheck constParameterPointer src/dirmodel.c 9
+cppcheck constParameterPointer src/job.c 6
+cppcheck constParameterPointer src/menu.c 2
+cppcheck constParameterPointer src/pathbar.c 1
+cppcheck constParameterPointer src/props.c 1
+cppcheck constParameterPointer src/scanner.c 4
+cppcheck constParameterPointer src/view.c 3
+cppcheck constParameterPointer src/window.c 9
+cppcheck constParameterPointer tests/fuzz/fuzz-filetype.c 1
+cppcheck constParameterPointer tests/test-devices.c 3
+cppcheck constParameterPointer tests/test-filetype.c 1
+cppcheck constParameterPointer tests/test-lifetime.c 2
+cppcheck constVariablePointer src/dirmodel.c 4
+cppcheck constVariablePointer src/fileops.c 1
+cppcheck constVariablePointer src/filetype.c 4
+cppcheck constVariablePointer src/scanner.c 1
+cppcheck constVariablePointer tests/test-devices.c 2
+cppcheck constVariablePointer tests/test-fileops.c 1
+cppcheck constVariablePointer tests/test-scanner.c 1
+cppcheck constVariable src/fileops.c 2
+cppcheck constVariable tests/test-fileops.c 2
+cppcheck constVariable tests/test-scanner.c 1
+cppcheck ignoredReturnValue tests/bench-scan.c 1
+cppcheck nullPointerOutOfResources tests/test-scanner.c 1
+cppcheck nullPointer src/fileops.c 2
+cppcheck syntaxError /usr/include/gtk-3.0/gdk/gdkdevicetool.h 1
