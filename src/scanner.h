@@ -44,11 +44,11 @@ typedef struct GbkScanner GbkScanner;
 
 /* Readable while messages are (or may be) queued. Call gbk_scanner_ack() before popping. */
 int gbk_scanner_wake_fd (const GbkScanner *s);
-void gbk_scanner_ack (GbkScanner *s);
+void gbk_scanner_ack (const GbkScanner *s);
 /* Next message, or nullptr if the queue is empty. Caller owns it. */
 [[nodiscard]] GbkScanMsg *gbk_scanner_pop (GbkScanner *s);
 /* Make the wake fd readable again (used when the consumer stops early with work left). */
-void gbk_scanner_rearm (GbkScanner *s);
+void gbk_scanner_rearm (const GbkScanner *s);
 
 /* Cancel the worker and release the caller's reference. `s` must not be used afterwards. */
 void gbk_scanner_stop (GbkScanner *s);

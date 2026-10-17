@@ -313,31 +313,31 @@ gbk_browser_up (GbkBrowser *b)
 }
 
 const char *
-gbk_browser_path (GbkBrowser *b)
+gbk_browser_path (const GbkBrowser *b)
 {
   return b->path;
 }
 
 GbkView *
-gbk_browser_view (GbkBrowser *b)
+gbk_browser_view (const GbkBrowser *b)
 {
   return b->view;
 }
 
 GbkPathbar *
-gbk_browser_pathbar (GbkBrowser *b)
+gbk_browser_pathbar (const GbkBrowser *b)
 {
   return b->pathbar;
 }
 
 GtkBox *
-gbk_browser_toolbar (GbkBrowser *b)
+gbk_browser_toolbar (const GbkBrowser *b)
 {
   return b->toolbar;
 }
 
 GbkDirModel *
-gbk_browser_model (GbkBrowser *b)
+gbk_browser_model (const GbkBrowser *b)
 {
   return b->model;
 }

@@ -25,9 +25,9 @@ GtkWidget *gbk_view_new (GbkTypeTable *types);
 
 /* Takes a reference. nullptr clears. Resets cursor and selection. */
 void gbk_view_set_model (GbkView *v, GbkDirModel *model);
-GbkDirModel *gbk_view_get_model (GbkView *v);
+GbkDirModel *gbk_view_get_model (const GbkView *v);
 
-GbkHandle gbk_view_cursor (GbkView *v);
+GbkHandle gbk_view_cursor (const GbkView *v);
 /* Moves the cursor to `h` (if visible), selects only it, scrolls it into view. */
 void gbk_view_select_only (GbkView *v, GbkHandle h);
 void gbk_view_select_all (GbkView *v);
@@ -64,7 +64,7 @@ bool gbk_view_type_ahead (GbkView *v, const char *utf8);
 const char *gbk_view_type_ahead_text (GbkView *v);   /* "" when idle */
 
 /* Layout introspection for tests. */
-size_t gbk_view_rows_per_column (GbkView *v);
+size_t gbk_view_rows_per_column (const GbkView *v);
 GbkHandle gbk_view_item_at (GbkView *v, double x, double y);   /* widget coordinates */
 
 /* Drag and drop (see dnd.h). What a drag of the current selection carries (uri-list). */

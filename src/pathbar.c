@@ -321,7 +321,7 @@ gbk_pathbar_button (GbkPathbar *bar, const char *path)
 }
 
 GtkEntry *
-gbk_pathbar_entry (GbkPathbar *bar)
+gbk_pathbar_entry (const GbkPathbar *bar)
 {
   return bar->entry;
 }

@@ -24,7 +24,7 @@ GbkDevices *gbk_devices_new (void);
  * (~20 ms on D-Bus with gvfs), so callers start it after the window has something to show.
  * Calling it again does nothing. */
 void gbk_devices_start (GbkDevices *d);
-bool gbk_devices_started (GbkDevices *d);
+bool gbk_devices_started (const GbkDevices *d);
 GMenuModel *gbk_devices_menu (GbkDevices *d);
 
 /* Finished: `path` is the opened device's folder (open only, else nullptr); `error` is

@@ -12,7 +12,7 @@ typedef bool (*Pred) (void *data);
 static bool
 wait_until (Pred pred, void *data)
 {
-  int64_t deadline = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+  int64_t deadline = g_get_monotonic_time () + INT64_C (10) * G_USEC_PER_SEC;
   while (g_get_monotonic_time () < deadline)
     {
       while (gtk_events_pending ())
@@ -424,7 +424,7 @@ end_fakes (void)
 /* ---- menu reading ---- */
 
 static GMenuModel *
-devices_menu (GbkWindow *w)
+devices_menu (const GbkWindow *w)
 {
   return gbk_devices_menu (gbk_window_devices (w));
 }
@@ -440,7 +440,7 @@ item_string (GMenuModel *m, int i, const char *attr)
 
 /* "Label: Action, Action" for every device, joined by " | ". */
 static char *
-describe (GbkWindow *w)
+describe (const GbkWindow *w)
 {
   GMenuModel *m = devices_menu (w);
   g_autoptr (GString) out = g_string_new (nullptr);
@@ -461,7 +461,7 @@ describe (GbkWindow *w)
 
 /* The id the menu gives device `label` (as shown) for `action` ("win.device-open", ...). */
 static char *
-device_id (GbkWindow *w, const char *label, const char *action)
+device_id (const GbkWindow *w, const char *label, const char *action)
 {
   GMenuModel *m = devices_menu (w);
   char *id = nullptr;
@@ -504,7 +504,7 @@ typedef struct
 static bool
 described_as (void *data)
 {
-  DescCtx *c = data;
+  const DescCtx *c = data;
   g_autofree char *d = describe (c->w);
   return g_str_equal (d, c->text);
 }
@@ -698,8 +698,8 @@ test_open (void)
   g_autofree char *a = make_dir (media, "A");
   g_autofree char *b = make_dir (media, "B");
   fake_mounted_volume_add ("A", a, false);
-  FakeVolume *vb = fake_volume_add ("B", b, true, 0);
-  FakeVolume *vc = fake_volume_add ("C", "/nonexistent", true, G_IO_ERROR_PERMISSION_DENIED);
+  const FakeVolume *vb = fake_volume_add ("B", b, true, 0);
+  const FakeVolume *vc = fake_volume_add ("C", "/nonexistent", true, G_IO_ERROR_PERMISSION_DENIED);
   FakeVolume *vd = fake_volume_add ("D", "/nonexistent", true, G_IO_ERROR_FAILED_HANDLED);
 
   GbkWindow *w = new_window (media);

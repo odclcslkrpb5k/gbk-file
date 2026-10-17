@@ -62,14 +62,14 @@ void gbk_job_start (GbkJob *job);
 void gbk_job_cancel (GbkJob *job);
 void gbk_job_answer (GbkJob *job, GbkChoice choice, bool apply_all);
 
-bool gbk_job_running (GbkJob *job);
+bool gbk_job_running (const GbkJob *job);
 GbkJobKind gbk_job_kind (GbkJob *job);
 const char *gbk_job_dest (GbkJob *job);        /* where things were created, or nullptr */
 size_t gbk_job_n_sources (GbkJob *job);
-double gbk_job_fraction (GbkJob *job);         /* 0..1, or -1 if unknown yet */
+double gbk_job_fraction (const GbkJob *job);         /* 0..1, or -1 if unknown yet */
 const char *gbk_job_current (GbkJob *job);     /* item being processed (display name) */
-GPtrArray *gbk_job_created (GbkJob *job);      /* names created in dest (after finishing) */
-const GbkFileInfo *gbk_job_info (GbkJob *job); /* INFO jobs, after success; else nullptr */
+GPtrArray *gbk_job_created (const GbkJob *job);     /* names created in dest (after finishing) */
+const GbkFileInfo *gbk_job_info (const GbkJob *job); /* INFO jobs, after success; else nullptr */
 
 /* Jobs still running (tests wait for 0). */
 int gbk_job_live (void);

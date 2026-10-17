@@ -35,19 +35,19 @@ G_DECLARE_FINAL_TYPE (GbkDirModel, gbk_dir_model, GBK, DIR_MODEL, GObject)
  *   "state-changed"  gbk_dir_model_state() changed */
 [[nodiscard]] GbkDirModel *gbk_dir_model_new (const char *path, GbkTypeTable *types);
 
-const char *gbk_dir_model_path (GbkDirModel *m);
-GbkDirState gbk_dir_model_state (GbkDirModel *m);
-int gbk_dir_model_error (GbkDirModel *m);          /* errno value in GBK_DIR_ERROR */
-bool gbk_dir_model_live (GbkDirModel *m);          /* live updates active */
+const char *gbk_dir_model_path (const GbkDirModel *m);
+GbkDirState gbk_dir_model_state (const GbkDirModel *m);
+int gbk_dir_model_error (const GbkDirModel *m);          /* errno value in GBK_DIR_ERROR */
+bool gbk_dir_model_live (const GbkDirModel *m);          /* live updates active */
 /* Free space on the directory's filesystem, if known yet. */
-bool gbk_dir_model_free_space (GbkDirModel *m, uint64_t *bytes);
+bool gbk_dir_model_free_space (const GbkDirModel *m, uint64_t *bytes);
 
 void gbk_dir_model_set_sort (GbkDirModel *m, GbkSortMode mode);
-GbkSortMode gbk_dir_model_sort (GbkDirModel *m);
+GbkSortMode gbk_dir_model_sort (const GbkDirModel *m);
 void gbk_dir_model_set_show_hidden (GbkDirModel *m, bool show);
-bool gbk_dir_model_show_hidden (GbkDirModel *m);
+bool gbk_dir_model_show_hidden (const GbkDirModel *m);
 
-size_t gbk_dir_model_n_entries (GbkDirModel *m);   /* including hidden */
+size_t gbk_dir_model_n_entries (const GbkDirModel *m);   /* including hidden */
 size_t gbk_dir_model_n_visible (GbkDirModel *m);
 /* `i` >= n_visible is a fatal programming error. */
 GbkHandle gbk_dir_model_visible_handle (GbkDirModel *m, size_t i);

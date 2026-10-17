@@ -59,7 +59,7 @@ on_changed (GbkDirModel *m G_GNUC_UNUSED, Timing *t)
 }
 
 static void
-run_until (GbkDirModel *m, GbkDirState state)
+run_until (const GbkDirModel *m, GbkDirState state)
 {
   while (gbk_dir_model_state (m) != state)
     g_main_context_iteration (nullptr, true);

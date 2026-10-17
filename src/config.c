@@ -1,6 +1,6 @@
 #include "config.h"
 
-#define CONFIG_MAX_BYTES (1024 * 1024)
+#define CONFIG_MAX_BYTES ((size_t) 1024 * 1024)
 #define OVERRIDE_WEIGHT 1000      /* config [Types] beat every system glob */
 
 static const char default_terminal[] = "xfce4-terminal --working-directory=%d";
@@ -325,7 +325,7 @@ gbk_config_load_data (const char *data, size_t len, GPtrArray *errors)
 
   g_autoptr (GError) error = nullptr;
   if (len > CONFIG_MAX_BYTES)
-    fail (&l, "config file is larger than %d bytes", CONFIG_MAX_BYTES);
+    fail (&l, "config file is larger than %zu bytes", CONFIG_MAX_BYTES);
   else if (memchr (data, '\0', len) != nullptr)
     fail (&l, "config file contains a NUL byte");
   else if (!g_key_file_load_from_data (kf, data, len, G_KEY_FILE_NONE, &error))

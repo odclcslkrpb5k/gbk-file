@@ -50,7 +50,7 @@ on_progress (uint64_t done G_GNUC_UNUSED, uint64_t total G_GNUC_UNUSED,
 static bool
 is_cancelled (void *data)
 {
-  Script *s = data;
+  const Script *s = data;
   return s->cancel_after_progress > 0 && s->progress_calls >= s->cancel_after_progress;
 }
 
@@ -381,7 +381,7 @@ test_copy_keeps_metadata (void)
   if (!have_xattr)
     g_test_message ("filesystem without user xattrs: not checking them");
 
-  struct timespec old[2] = { { .tv_sec = 1000000000 }, { .tv_sec = 1100000000, .tv_nsec = 123 } };
+  const struct timespec old[2] = { { .tv_sec = 1000000000 }, { .tv_sec = 1100000000, .tv_nsec = 123 } };
   g_assert_cmpint (utimensat (AT_FDCWD, f, old, 0), ==, 0);
   g_assert_cmpint (utimensat (AT_FDCWD, lnk, old, AT_SYMLINK_NOFOLLOW), ==, 0);
   g_assert_cmpint (utimensat (AT_FDCWD, sub, old, 0), ==, 0);
@@ -533,7 +533,7 @@ test_info (void)
   mk ("i/f.txt", "hello");
   g_autofree char *f = P ("i/f.txt");
   g_assert_cmpint (chmod (f, 0640), ==, 0);
-  struct timespec ts[2] = { { .tv_sec = 1000000000, .tv_nsec = 5 }, { .tv_sec = 1500000000, .tv_nsec = 7 } };
+  const struct timespec ts[2] = { { .tv_sec = 1000000000, .tv_nsec = 5 }, { .tv_sec = 1500000000, .tv_nsec = 7 } };
   g_assert_cmpint (utimensat (AT_FDCWD, f, ts, 0), ==, 0);
   g_autoptr (GbkFileInfo) i = gbk_ops_info (f, nullptr);
   g_assert_nonnull (i);

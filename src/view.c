@@ -512,7 +512,7 @@ gbk_view_selected (GbkView *v, size_t *n)
 }
 
 GbkHandle
-gbk_view_cursor (GbkView *v)
+gbk_view_cursor (const GbkView *v)
 {
   return v->cursor;
 }
@@ -726,7 +726,7 @@ gbk_view_set_model (GbkView *v, GbkDirModel *model)
 }
 
 GbkDirModel *
-gbk_view_get_model (GbkView *v)
+gbk_view_get_model (const GbkView *v)
 {
   return v->model;
 }
@@ -734,7 +734,7 @@ gbk_view_get_model (GbkView *v)
 /* ---- introspection ---- */
 
 size_t
-gbk_view_rows_per_column (GbkView *v)
+gbk_view_rows_per_column (const GbkView *v)
 {
   return v->rows;
 }

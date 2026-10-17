@@ -35,7 +35,7 @@ fixture_table (void)
 }
 
 static const char *
-mime_of (GbkTypeTable *t, const char *name, GbkFileKind kind, bool exec)
+mime_of (const GbkTypeTable *t, const char *name, GbkFileKind kind, bool exec)
 {
   return gbk_type_table_mime (t, gbk_type_table_lookup (t, name, strlen (name), kind, exec));
 }

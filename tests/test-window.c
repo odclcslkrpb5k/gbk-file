@@ -15,7 +15,7 @@ typedef bool (*Pred) (void *data);
 static bool
 wait_until (Pred pred, void *data)
 {
-  int64_t deadline = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+  int64_t deadline = g_get_monotonic_time () + INT64_C (10) * G_USEC_PER_SEC;
   while (g_get_monotonic_time () < deadline)
     {
       while (gtk_events_pending ())
@@ -468,6 +468,7 @@ test_context_menu (void)
 
   /* Close the window with a menu still open: no callbacks into a dead window. */
   menu = open_context_menu (w);
+  g_assert_true (gtk_widget_get_visible (GTK_WIDGET (menu)));
   gtk_widget_destroy (GTK_WIDGET (w));
   while (gtk_events_pending ())
     gtk_main_iteration ();

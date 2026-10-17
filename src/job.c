@@ -1,7 +1,7 @@
 #include "job.h"
 #include "lifetime.h"
 
-#define PROGRESS_INTERVAL_US (50 * 1000)
+#define PROGRESS_INTERVAL_US (INT64_C (50) * 1000)
 
 typedef enum
 {
@@ -491,16 +491,16 @@ gbk_job_new_info (const char *path)
   return job_new_one (GBK_JOB_INFO, path, nullptr);
 }
 
-bool gbk_job_running (GbkJob *job) { return job->running; }
+bool gbk_job_running (const GbkJob *job) { return job->running; }
 GbkJobKind gbk_job_kind (GbkJob *job) { return job->s->kind; }
-const GbkFileInfo *gbk_job_info (GbkJob *job) { return job->info; }
+const GbkFileInfo *gbk_job_info (const GbkJob *job) { return job->info; }
 const char *gbk_job_dest (GbkJob *job) { return job->s->dest; }
 size_t gbk_job_n_sources (GbkJob *job) { return job->s->sources->len; }
 const char *gbk_job_current (GbkJob *job) { return job->current != nullptr ? job->current : ""; }
-GPtrArray *gbk_job_created (GbkJob *job) { return job->created; }
+GPtrArray *gbk_job_created (const GbkJob *job) { return job->created; }
 
 double
-gbk_job_fraction (GbkJob *job)
+gbk_job_fraction (const GbkJob *job)
 {
   if (job->total == 0)
     return -1;

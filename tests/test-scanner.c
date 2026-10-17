@@ -111,7 +111,7 @@ model_matches_fs (void *data)
     gbk_fatal ("opendir %s: %s", c->dir, g_strerror (errno));
   size_t n = 0;
   bool ok = true;
-  struct dirent *de;
+  const struct dirent *de;
   while ((de = readdir (d)) != nullptr)
     {
       if (g_str_equal (de->d_name, ".") || g_str_equal (de->d_name, ".."))
@@ -201,7 +201,7 @@ test_live_updates (void)
 
   GbkHandle first = gbk_dir_model_find (m, "first");
   g_autofree char *p1 = g_build_filename (dir, "first", nullptr);
-  struct timespec ts[2] = { { .tv_sec = 1000 }, { .tv_sec = 1000 } };
+  const struct timespec ts[2] = { { .tv_sec = 1000 }, { .tv_sec = 1000 } };
   g_assert_cmpint (utimensat (AT_FDCWD, p1, ts, 0), ==, 0);
   g_assert_true (wait_until (first_mtime_updated, m, 5000));
   g_assert_cmpint (get (m, "first")->mtime_ns, ==, 1000000000000LL);

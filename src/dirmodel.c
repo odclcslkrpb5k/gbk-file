@@ -4,7 +4,7 @@
 
 /* While a directory is still loading, re-sort for display at most this often (the first
  * chunk is always shown at once). Each re-sort is O(n log n) over everything so far. */
-#define LOADING_REFRESH_US (100 * 1000)
+#define LOADING_REFRESH_US (INT64_C (100) * 1000)
 
 /* Messages handled per main-loop wakeup before yielding (keeps the UI responsive while a
  * huge directory streams in). */
@@ -94,7 +94,7 @@ resolve (GbkDirModel *m, GbkHandle h)
 /* ---- ordering ---- */
 
 static bool
-is_visible (GbkDirModel *m, const GbkEntry *e)
+is_visible (const GbkDirModel *m, const GbkEntry *e)
 {
   return e != nullptr && (m->show_hidden || !(e->flags & GBK_ENTRY_HIDDEN));
 }
@@ -251,7 +251,7 @@ remove_slot (GbkDirModel *m, uint32_t id)
 static void
 upsert (GbkDirModel *m, GbkEntry *e)
 {
-  void *found = g_hash_table_lookup (m->index, gbk_entry_name (e));
+  const void *found = g_hash_table_lookup (m->index, gbk_entry_name (e));
   uint32_t id;
   if (found != nullptr)
     {
@@ -299,7 +299,7 @@ upsert_all (GbkDirModel *m, GPtrArray *entries)
 static void
 remove_name (GbkDirModel *m, const char *name)
 {
-  void *found = g_hash_table_lookup (m->index, name);
+  const void *found = g_hash_table_lookup (m->index, name);
   if (found != nullptr)
     remove_slot (m, GPOINTER_TO_UINT (found) - 1);
 }
@@ -573,7 +573,7 @@ gbk_dir_model_check_order (GbkDirModel *m)
   size_t live = 0;
   for (uint32_t i = 0; i < m->slots->len; i++)
     {
-      Slot *s = slot_at (m, i);
+      const Slot *s = slot_at (m, i);
       if (s->e != nullptr)
         live++;
       if (s->e == nullptr && s->pos != NO_POS)
@@ -586,31 +586,31 @@ gbk_dir_model_check_order (GbkDirModel *m)
 /* ---- accessors ---- */
 
 const char *
-gbk_dir_model_path (GbkDirModel *m)
+gbk_dir_model_path (const GbkDirModel *m)
 {
   return m->path;
 }
 
 GbkDirState
-gbk_dir_model_state (GbkDirModel *m)
+gbk_dir_model_state (const GbkDirModel *m)
 {
   return m->state;
 }
 
 int
-gbk_dir_model_error (GbkDirModel *m)
+gbk_dir_model_error (const GbkDirModel *m)
 {
   return m->error;
 }
 
 bool
-gbk_dir_model_live (GbkDirModel *m)
+gbk_dir_model_live (const GbkDirModel *m)
 {
   return m->live;
 }
 
 bool
-gbk_dir_model_free_space (GbkDirModel *m, uint64_t *bytes)
+gbk_dir_model_free_space (const GbkDirModel *m, uint64_t *bytes)
 {
   *bytes = m->free_bytes;
   return m->has_free;
@@ -627,7 +627,7 @@ gbk_dir_model_set_sort (GbkDirModel *m, GbkSortMode mode)
 }
 
 GbkSortMode
-gbk_dir_model_sort (GbkDirModel *m)
+gbk_dir_model_sort (const GbkDirModel *m)
 {
   return m->sort;
 }
@@ -643,13 +643,13 @@ gbk_dir_model_set_show_hidden (GbkDirModel *m, bool show)
 }
 
 bool
-gbk_dir_model_show_hidden (GbkDirModel *m)
+gbk_dir_model_show_hidden (const GbkDirModel *m)
 {
   return m->show_hidden;
 }
 
 size_t
-gbk_dir_model_n_entries (GbkDirModel *m)
+gbk_dir_model_n_entries (const GbkDirModel *m)
 {
   return m->n_entries;
 }
@@ -686,7 +686,7 @@ gbk_dir_model_get (GbkDirModel *m, GbkHandle h)
 GbkHandle
 gbk_dir_model_find (GbkDirModel *m, const char *raw_name)
 {
-  void *found = g_hash_table_lookup (m->index, raw_name);
+  const void *found = g_hash_table_lookup (m->index, raw_name);
   if (found == nullptr)
     return GBK_HANDLE_NONE;
   uint32_t id = GPOINTER_TO_UINT (found) - 1;

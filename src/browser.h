@@ -20,12 +20,12 @@ void gbk_browser_back (GbkBrowser *b);
 void gbk_browser_forward (GbkBrowser *b);
 void gbk_browser_up (GbkBrowser *b);
 
-const char *gbk_browser_path (GbkBrowser *b);
-GbkView *gbk_browser_view (GbkBrowser *b);
-GbkPathbar *gbk_browser_pathbar (GbkBrowser *b);
+const char *gbk_browser_path (const GbkBrowser *b);
+GbkView *gbk_browser_view (const GbkBrowser *b);
+GbkPathbar *gbk_browser_pathbar (const GbkBrowser *b);
 /* The row above the view that holds the path bar; the window adds its menu button here. */
-GtkBox *gbk_browser_toolbar (GbkBrowser *b);
-GbkDirModel *gbk_browser_model (GbkBrowser *b);
+GtkBox *gbk_browser_toolbar (const GbkBrowser *b);
+GbkDirModel *gbk_browser_model (const GbkBrowser *b);
 
 void gbk_browser_set_show_hidden (GbkBrowser *b, bool show);
 void gbk_browser_set_sort (GbkBrowser *b, GbkSortMode sort);

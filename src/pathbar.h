@@ -25,7 +25,7 @@ char *gbk_pathbar_describe (GbkPathbar *bar);
 void gbk_pathbar_click (GbkPathbar *bar, const char *path);
 /* For tests: the button for `path`. */
 GtkWidget *gbk_pathbar_button (GbkPathbar *bar, const char *path);
-GtkEntry *gbk_pathbar_entry (GbkPathbar *bar);
+GtkEntry *gbk_pathbar_entry (const GbkPathbar *bar);
 /* For tests: as if `uri_list` were dropped on the button for `path`. */
 void gbk_pathbar_drop_for_test (GbkPathbar *bar, const char *path, const char *uri_list,
                                 GdkEvent *trigger);

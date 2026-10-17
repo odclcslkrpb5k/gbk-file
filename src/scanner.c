@@ -200,7 +200,7 @@ full_scan (GbkScanner *s, int dirfd, bool live)
   for (;;)
     {
       errno = 0;
-      struct dirent *d = readdir (dir);
+      const struct dirent *d = readdir (dir);
       if (d == nullptr)
         {
           if (errno != 0)
@@ -331,7 +331,7 @@ now_ms (void)
 /* Waits for inotify activity or cancellation. timeout_ms < 0 waits forever.
  * Returns false if cancelled. */
 static bool
-wait_events (GbkScanner *s, GbkInotifySub *sub, int timeout_ms)
+wait_events (GbkScanner *s, const GbkInotifySub *sub, int timeout_ms)
 {
   struct pollfd fds[2] = {
     { .fd = s->cancel_fd, .events = POLLIN },
@@ -507,7 +507,7 @@ gbk_scanner_wake_fd (const GbkScanner *s)
 }
 
 void
-gbk_scanner_ack (GbkScanner *s)
+gbk_scanner_ack (const GbkScanner *s)
 {
   uint64_t v;
   while (read (s->wake_fd, &v, sizeof v) < 0 && errno == EINTR)
@@ -521,7 +521,7 @@ gbk_scanner_pop (GbkScanner *s)
 }
 
 void
-gbk_scanner_rearm (GbkScanner *s)
+gbk_scanner_rearm (const GbkScanner *s)
 {
   eventfd_signal (s->wake_fd);
 }

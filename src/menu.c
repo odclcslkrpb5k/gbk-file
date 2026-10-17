@@ -38,7 +38,7 @@ action_matches_all (const GbkAction *a, GPtrArray *items)
 }
 
 static bool
-all_regular (GPtrArray *items)
+all_regular (const GPtrArray *items)
 {
   for (guint i = 0; i < items->len; i++)
     if (!((const GbkItem *) g_ptr_array_index (items, i))->regular)
@@ -47,7 +47,7 @@ all_regular (GPtrArray *items)
 }
 
 static bool
-all_dirs (GPtrArray *items)
+all_dirs (const GPtrArray *items)
 {
   for (guint i = 0; i < items->len; i++)
     if (!((const GbkItem *) g_ptr_array_index (items, i))->is_dir)

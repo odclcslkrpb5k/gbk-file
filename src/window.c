@@ -98,7 +98,7 @@ update_sort_button (GbkWindow *w)
 static void
 update_chrome (GbkWindow *w)
 {
-  GbkBrowser *b = active (w);
+  const GbkBrowser *b = active (w);
   const char *path = gbk_browser_path (b);
   set_title_path (w, path);
   update_status (w);
@@ -267,7 +267,7 @@ on_sort_button_clicked (GtkButton *button G_GNUC_UNUSED, GbkWindow *w)
 
 /* The selection as owned GbkItems: safe to keep while the model changes underneath. */
 static GPtrArray *
-snapshot_selection (GbkWindow *w, GbkBrowser *b)
+snapshot_selection (const GbkWindow *w, const GbkBrowser *b)
 {
   GPtrArray *items = g_ptr_array_new_with_free_func ((GDestroyNotify) gbk_item_free);
   GbkDirModel *m = gbk_browser_model (b);
@@ -550,7 +550,7 @@ rename_item (GbkWindow *w, const GbkItem *it)
 /* "New Folder", or "New Folder (n)" if the folder (as last listed) has that name. Only a
  * suggestion: creating never replaces, whatever appeared since. */
 static void
-create_item (GbkWindow *w, GbkBrowser *b, const char *dir, bool folder)
+create_item (GbkWindow *w, const GbkBrowser *b, const char *dir, bool folder)
 {
   const char *base = folder ? "New Folder" : "New File";
   GbkDirModel *m = gbk_browser_model (b);
@@ -564,7 +564,7 @@ create_item (GbkWindow *w, GbkBrowser *b, const char *dir, bool folder)
 }
 
 static bool
-all_executable (GPtrArray *items)
+all_executable (const GPtrArray *items)
 {
   for (guint i = 0; i < items->len; i++)
     if (!((const GbkItem *) g_ptr_array_index (items, i))->executable)
@@ -917,7 +917,7 @@ on_drop_chosen (GtkMenuItem *mi, GbkWindow *w)
 }
 
 static bool
-all_in (GPtrArray *paths, const char *dir)
+all_in (const GPtrArray *paths, const char *dir)
 {
   for (guint i = 0; i < paths->len; i++)
     {
@@ -1369,7 +1369,7 @@ app_menu_button (GbkWindow *w)
 }
 
 GbkWindow *
-gbk_window_new (GtkApplication *app, GbkContext *ctx, const char *path)
+gbk_window_new (const GtkApplication *app, GbkContext *ctx, const char *path)
 {
   GbkWindow *w = g_object_new (GBK_TYPE_WINDOW, "application", app, nullptr);
   w->ctx = gbk_context_ref (ctx);
@@ -1472,7 +1472,7 @@ gbk_window_tab_path (GbkWindow *w, int i)
 }
 
 GbkDevices *
-gbk_window_devices (GbkWindow *w)
+gbk_window_devices (const GbkWindow *w)
 {
   return w->devices;
 }
@@ -1490,19 +1490,19 @@ gbk_window_status (GbkWindow *w)
 }
 
 GtkWidget *
-gbk_window_status_bar (GbkWindow *w)
+gbk_window_status_bar (const GbkWindow *w)
 {
   return w->status_bar;
 }
 
 GtkButton *
-gbk_window_sort_button (GbkWindow *w)
+gbk_window_sort_button (const GbkWindow *w)
 {
   return w->sort_button;
 }
 
 GtkToggleButton *
-gbk_window_hidden_button (GbkWindow *w)
+gbk_window_hidden_button (const GbkWindow *w)
 {
   return w->hidden_button;
 }

@@ -163,14 +163,17 @@ is_within (const char *inner, const char *outer)
 
 /* Owner and group; failing that (not root), the group alone; failing that, nothing. */
 static void
-keep_owner (int fd, const char *path, const struct stat *st)
+keep_owner_fd (int fd, const struct stat *st)
 {
-  if (fd >= 0)
-    {
-      if (fchown (fd, st->st_uid, st->st_gid) != 0)
-        (void) !fchown (fd, (uid_t) -1, st->st_gid);
-    }
-  else if (fchownat (AT_FDCWD, path, st->st_uid, st->st_gid, AT_SYMLINK_NOFOLLOW) != 0)
+  if (fchown (fd, st->st_uid, st->st_gid) != 0)
+    (void) !fchown (fd, (uid_t) -1, st->st_gid);
+}
+
+/* The same by path, without following a symlink. */
+static void
+keep_owner_path (const char *path, const struct stat *st)
+{
+  if (fchownat (AT_FDCWD, path, st->st_uid, st->st_gid, AT_SYMLINK_NOFOLLOW) != 0)
     (void) !fchownat (AT_FDCWD, path, (uid_t) -1, st->st_gid, AT_SYMLINK_NOFOLLOW);
 }
 
@@ -208,11 +211,11 @@ keep_xattrs (int in, int out, const char *src, const char *dst)
 static void
 keep_metadata (const char *src, const char *dst, const struct stat *st)
 {
-  keep_owner (-1, dst, st);
+  keep_owner_path (dst, st);
   keep_xattrs (-1, -1, src, dst);
   if (!S_ISLNK (st->st_mode))
     (void) !fchmodat (AT_FDCWD, dst, st->st_mode & 07777, 0);
-  struct timespec times[2] = { st->st_atim, st->st_mtim };
+  const struct timespec times[2] = { st->st_atim, st->st_mtim };
   (void) !utimensat (AT_FDCWD, dst, times, AT_SYMLINK_NOFOLLOW);
 }
 
@@ -299,12 +302,12 @@ copy_file (Ctx *c, const char *src, const char *dst, const struct stat *st, bool
   int err = copy_data (c, in, out, shown);
   if (err == 0)
     {
-      keep_owner (out, nullptr, st);
+      keep_owner_fd (out, st);
       keep_xattrs (in, out, nullptr, nullptr);
     }
   if (err == 0 && fchmod (out, st->st_mode & 07777) != 0)
     err = errno;
-  struct timespec times[2] = { st->st_atim, st->st_mtim };
+  const struct timespec times[2] = { st->st_atim, st->st_mtim };
   if (err == 0 && futimens (out, times) != 0)
     err = errno;
   /* Replacing: make the data durable before the old file disappears. */
@@ -364,14 +367,20 @@ copy_symlink (Ctx *c, const char *src, const char *dst, const struct stat *st, b
 static bool
 copy_special (Ctx *c, const char *src, const char *dst, const struct stat *st, bool replace)
 {
-  g_autofree char *dir = g_path_get_dirname (dst);
-  g_autofree char *base = g_strdup_printf (TMP_PREFIX "%" G_GINT64_FORMAT, g_get_real_time ());
-  g_autofree char *tmp = replace ? g_build_filename (dir, base, nullptr) : nullptr;
-  const char *make = replace ? tmp : dst;
+  /* Replacing: made under a temporary name beside it, then renamed over it. */
+  g_autofree char *tmp = nullptr;
+  if (replace)
+    {
+      g_autofree char *dir = g_path_get_dirname (dst);
+      g_autofree char *base = g_strdup_printf (TMP_PREFIX "%" G_GINT64_FORMAT,
+                                               g_get_real_time ());
+      tmp = g_build_filename (dir, base, nullptr);
+    }
+  const char *make = tmp != nullptr ? tmp : dst;
   if (mknod (make, st->st_mode & (S_IFMT | 0600), st->st_rdev) != 0)
     return fail_errno (c, dst, errno, "Can't create");
   keep_metadata (src, make, st);
-  if (replace && rename (tmp, dst) != 0)
+  if (tmp != nullptr && rename (tmp, dst) != 0)
     {
       int err = errno;
       unlink (tmp);
@@ -500,14 +509,14 @@ delete_at (Ctx *c, int parent, const char *name, const char *path, int depth)
             close (fd);
           return fail_errno (c, path, err, "Can't delete");
         }
-      struct dirent *de;
+      const struct dirent *de;
       bool ok = true;
       while (ok && (de = readdir (d)) != nullptr)
         {
           if (g_str_equal (de->d_name, ".") || g_str_equal (de->d_name, ".."))
             continue;
           g_autofree char *child = g_build_filename (path, de->d_name, nullptr);
-          ok = delete_at (c, dirfd (d), de->d_name, child, depth + 1);
+          ok = delete_at (c, fd, de->d_name, child, depth + 1);   /* d's own fd */
         }
       closedir (d);
       if (!ok)

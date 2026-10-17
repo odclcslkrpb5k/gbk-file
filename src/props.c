@@ -343,7 +343,7 @@ gbk_props_new (GtkWindow *parent, const char *path, const char *mime)
 }
 
 bool
-gbk_props_loaded (GbkProps *p)
+gbk_props_loaded (const GbkProps *p)
 {
   return p->loaded;
 }

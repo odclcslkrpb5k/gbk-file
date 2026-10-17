@@ -3,7 +3,7 @@
 #include "fuzz.h"
 
 static void
-check (GbkTypeTable *t, const char *name, size_t len, GbkFileKind kind, bool exec)
+check (const GbkTypeTable *t, const char *name, size_t len, GbkFileKind kind, bool exec)
 {
   GbkTypeId id = gbk_type_table_lookup (t, name, len, kind, exec);
   g_assert (id < gbk_type_table_size (t));

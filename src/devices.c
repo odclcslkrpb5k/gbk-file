@@ -275,7 +275,7 @@ gbk_devices_start (GbkDevices *d)
 }
 
 bool
-gbk_devices_started (GbkDevices *d)
+gbk_devices_started (const GbkDevices *d)
 {
   return d->monitor != nullptr;
 }
@@ -420,7 +420,7 @@ begin_removal (Pending *p)
 }
 
 static bool
-readers_busy (Pending *p)
+readers_busy (const Pending *p)
 {
   for (guint i = 0; i < p->roots->len; i++)
     if (gbk_scanner_busy_under (p->roots->pdata[i]))

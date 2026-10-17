@@ -48,7 +48,7 @@ on_finished (GbkJob *job G_GNUC_UNUSED, GError *error, Watch *w)
 static void
 wait_finished (Watch *w)
 {
-  int64_t deadline = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+  int64_t deadline = g_get_monotonic_time () + INT64_C (10) * G_USEC_PER_SEC;
   while (!w->finished && g_get_monotonic_time () < deadline)
     g_main_context_iteration (nullptr, true);
   g_assert_true (w->finished);
@@ -138,7 +138,7 @@ test_cancel_while_asking (void)
 static bool
 no_jobs (void)
 {
-  int64_t deadline = g_get_monotonic_time () + 10 * G_USEC_PER_SEC;
+  int64_t deadline = g_get_monotonic_time () + INT64_C (10) * G_USEC_PER_SEC;
   while (gbk_job_live () != 0 && g_get_monotonic_time () < deadline)
     g_main_context_iteration (nullptr, true);
   return gbk_job_live () == 0;

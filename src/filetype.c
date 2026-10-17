@@ -80,7 +80,7 @@ table_free_contents (GbkTypeTable *t)
 static GbkTypeId
 intern_mime (GbkTypeTable *t, const char *mime, bool *ok)
 {
-  void *v = g_hash_table_lookup (t->mime_ids, mime);
+  const void *v = g_hash_table_lookup (t->mime_ids, mime);
   if (v != nullptr)
     {
       *ok = true;
@@ -184,7 +184,7 @@ gbk_type_builder_add (GbkTypeBuilder *b, const char *ext, const char *mime,
 
   GHashTable *table = case_sensitive ? t->ext_cs : t->ext_ci;
   char *key = case_sensitive ? g_strdup (ext) : g_ascii_strdown (ext, (gssize) ext_len);
-  void *existing = g_hash_table_lookup (table, key);
+  const void *existing = g_hash_table_lookup (table, key);
   if (existing != nullptr && packed_weight (existing) >= weight)
     {
       g_free (key);            /* earlier mapping wins ties */
@@ -379,10 +379,10 @@ lookup_ext (const GbkTypeTable *t, const char *ext, size_t len)
   char buf[GBK_TYPE_MAX_EXT + 1];
   memcpy (buf, ext, len);
   buf[len] = '\0';
-  void *cs = g_hash_table_lookup (t->ext_cs, buf);
+  const void *cs = g_hash_table_lookup (t->ext_cs, buf);
   for (size_t i = 0; i < len; i++)
     buf[i] = g_ascii_tolower (buf[i]);
-  void *ci = g_hash_table_lookup (t->ext_ci, buf);
+  const void *ci = g_hash_table_lookup (t->ext_ci, buf);
 
   if (cs != nullptr && (ci == nullptr || packed_weight (cs) >= packed_weight (ci)))
     return packed_id (cs);
