@@ -1,0 +1,3 @@
+# Whitespace-only commits, for git blame --ignore-revs-file (or blame.ignoreRevsFile).
+# clang-format adoption
+7628a8997921a04dda6f517bc5d36714e42ed130
